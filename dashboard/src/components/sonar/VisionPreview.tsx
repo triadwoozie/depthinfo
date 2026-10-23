@@ -329,6 +329,7 @@ function CloudView() {
       in vec3 a_position;
       in vec3 a_color;
       uniform vec2 u_rotation;
+      uniform vec2 u_viewport_scale;
       out vec3 v_color;
       void main() {
         float cy = cos(u_rotation.y);
@@ -338,7 +339,12 @@ function CloudView() {
         float sx = sin(u_rotation.x);
         p = vec3(p.x, p.y * cx - p.z * sx, p.y * sx + p.z * cx);
         float perspective = 2.6 / (3.8 + p.z);
-        gl_Position = vec4(p.x * perspective, p.y * perspective, p.z * 0.12, 1.0);
+        gl_Position = vec4(
+          p.x * perspective * u_viewport_scale.x,
+          p.y * perspective * u_viewport_scale.y,
+          p.z * 0.12,
+          1.0
+        );
         gl_PointSize = 2.0 + clamp((p.z + 1.0) * 0.8, 0.0, 1.5);
         v_color = a_color;
       }`
@@ -394,11 +400,21 @@ function CloudView() {
     gl.vertexAttribPointer(colorLocation, 3, gl.FLOAT, false, 0, 0)
 
     const rotationLocation = gl.getUniformLocation(program, "u_rotation")
+    const viewportScaleLocation = gl.getUniformLocation(program, "u_viewport_scale")
     const resize = () => {
       const ratio = Math.min(window.devicePixelRatio || 1, 2)
-      canvas.width = Math.max(1, Math.floor(canvas.clientWidth * ratio))
-      canvas.height = Math.max(1, Math.floor(canvas.clientHeight * ratio))
+      const width = Math.max(1, Math.floor(canvas.clientWidth * ratio))
+      const height = Math.max(1, Math.floor(canvas.clientHeight * ratio))
+      canvas.width = width
+      canvas.height = height
       gl.viewport(0, 0, canvas.width, canvas.height)
+      const aspect = width / height
+      gl.useProgram(program)
+      gl.uniform2f(
+        viewportScaleLocation,
+        aspect >= 1 ? 1 / aspect : 1,
+        aspect >= 1 ? 1 : aspect
+      )
     }
     const observer = new ResizeObserver(resize)
     observer.observe(canvas)

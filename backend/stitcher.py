@@ -107,7 +107,10 @@ class Stitcher:
 
     def _unproject(self, vf: VisionFrame, cfg: SystemConfig) -> tuple[np.ndarray, np.ndarray]:
         h, w = vf.z_metric.shape
-        fx = (w / 2.0) / math.tan(math.radians(cfg.hardware.camera_fov_deg) / 2.0)
+        fov_x = math.radians(cfg.hardware.camera_fov_deg)
+        fov_y = 2.0 * math.atan(math.tan(fov_x / 2.0) * h / w)
+        fx = (w / 2.0) / math.tan(fov_x / 2.0)
+        fy = (h / 2.0) / math.tan(fov_y / 2.0)
         cx, cy = w / 2.0, h / 2.0
         vs, us = np.mgrid[0:h:STRIDE, 0:w:STRIDE]
         z = vf.z_metric[::STRIDE, ::STRIDE]
@@ -116,7 +119,7 @@ class Stitcher:
         if z.size == 0:
             return np.zeros((0, 3), np.float32), np.zeros((0, 3), np.float32)
 
-        cam = np.stack([(u - cx) / fx * z, -(v - cy) / fx * z, z], axis=1)  # y flipped → up
+        cam = np.stack([(u - cx) / fx * z, -(v - cy) / fy * z, z], axis=1)  # y flipped → up
         pose = cfg.hardware.camera_pose
         pts = cam @ camera_rotation(pose).T + np.array([pose.x_cm, pose.y_cm, pose.z_cm]) / 100.0
 

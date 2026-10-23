@@ -27,7 +27,11 @@ def make_frame(z_metric, bgr=None):
 
 def test_unprojection_matches_pinhole_equations():
     cfg = SystemConfig()
-    fx = (W / 2) / math.tan(math.radians(cfg.hardware.camera_fov_deg) / 2)
+    fov_x = math.radians(cfg.hardware.camera_fov_deg)
+    fov_y = 2 * math.atan(math.tan(fov_x / 2) * H / W)
+    fx = (W / 2) / math.tan(fov_x / 2)
+    fy = (H / 2) / math.tan(fov_y / 2)
+    assert fy == pytest.approx(fx)
     z = np.full((H, W), np.nan, np.float32)
     u, v, depth = 400, 200, 2.0  # multiples of the stitcher's pixel stride
     z[v, u] = depth
@@ -36,7 +40,7 @@ def test_unprojection_matches_pinhole_equations():
     x, y, zz = pts[0]
     assert zz == pytest.approx(depth)
     assert x == pytest.approx((u - W / 2) * depth / fx, abs=1e-5)
-    assert y == pytest.approx(-(v - H / 2) * depth / fx, abs=1e-5)  # +y is up, image v grows down
+    assert y == pytest.approx(-(v - H / 2) * depth / fy, abs=1e-5)  # +y is up, image v grows down
 
 
 def test_every_point_keeps_its_own_depth():
