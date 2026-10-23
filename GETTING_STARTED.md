@@ -73,8 +73,9 @@ curl -fsS http://localhost:8000/healthz
 curl -fsS http://localhost:8000/api/devices
 ```
 
-`/healthz` reports `mock`, `sonar_status`, `sonar_error`, `vision_fps`, `depth_backend`,
-`vertex_count` and the detected Blender path. API docs: <http://localhost:8000/docs>.
+`/healthz` reports `mock`, `sonar_status`, `sonar_error`, `vision_fps`, `camera_source`,
+`depth_mode_active`, `depth_model` (provider and FPS), `vertex_count`, the detected Blender path and
+the Blender stream counters (`udp_sent`, `udp_dropped`). API docs: <http://localhost:8000/docs>.
 
 ## 3. Start the dashboard (port 3000)
 
@@ -97,7 +98,8 @@ and (in mock mode) *Mock mode*. The dashboard talks to `http://localhost:8000`; 
 1. **Fog map / Optical / 3D cloud** tabs in *Spatial monitor*: all three should stream.
 2. Drag the **scan range** slider: the fog map clips at the new distances.
 3. **Echo analyzer**: drag the red blanking zone; the value is stored in the backend.
-4. **Calibrate** (header button): chirp, gating and smoothing sliders.
+4. **Calibrate** (header button): the guided wizard (microphone level, then Rounds 1 to 4) and a
+   *Manual* tab with the chirp, gating and smoothing sliders.
 5. **Export static .blend scene** (left column): the dialog lists `.blend`, `.glb`, `.ply`.
    Files land in `backend/exports/` and are also served at `http://localhost:8000/exports/`.
 
@@ -117,7 +119,7 @@ curl -X POST localhost:8000/api/export/blend
 |---|---|---|
 | **Disabled / Direct sonar** | Flat plane at the sonar distance | none |
 | **Fast heuristic** (default) | Edge, brightness and background-difference cues, bilateral-smoothed | about 1 ms |
-| **Neural ONNX** | Depth-Anything-V2-Small in a background thread | about 1.5 FPS of depth updates on CPU |
+| **Neural ONNX** | Depth-Anything-V2-Small in a background thread | about 1.5 FPS of depth updates on CPU; about 15 to 19 FPS with CUDA (RTX 3050 Laptop) |
 
 All modes feed the same hybrid equation, with the sonar as the metric anchor:
 
@@ -132,7 +134,8 @@ reflector: a median over the cone lands on the background whenever the subject c
 of it, which pushes the subject in front of the sonar distance and the wall onto it. Each pixel is then unprojected through the pinhole model and
 the camera pose, so the cloud has true front-to-back relief. If a mode cannot run (for example the
 model file is missing) the dashboard shows why and the **Running:** badge shows the mode that is
-really active. The 3D tab and the Blender stream show the newest single frame; the exported scene
+really active. The model is loaded the first time neural mode is selected and freed again 30 s after
+it was last used. The 3D tab and the Blender stream show the newest single frame; the exported scene
 uses the fused (stitched) cloud. The camera is read in its own thread; if it cannot be opened or
 disconnects, the app logs a warning, shows *Camera unavailable: synthetic video* and keeps
 retrying every 5 s.
@@ -174,7 +177,7 @@ blender --command extension build --source-dir blender/sonar_imaging --output-di
 ```
 
 In Blender: **Edit ▸ Preferences ▸ Get Extensions ▸ (menu) ▸ Install from Disk…**, pick
-`sonar_imaging_receiver-2.0.0.zip` (or `blender --command extension install-file -r user_default --enable <zip>`).
+`sonar_imaging_receiver-2.0.1.zip` (or `blender --command extension install-file -r user_default --enable <zip>`).
 Then in the 3D viewport press **N**, open the **Sonar Imaging** tab:
 
 1. **Create Displaced Mesh** builds `Sonar_Displacement_Mesh` (a 128/256/512 quad grid), the float
@@ -219,17 +222,19 @@ do not use headphones.
 
    Round 1 returns `"quality": "noisy"` and Round 2 returns `"quality": "input_too_loud"`
    when the audio path is not usable. Treat those as "fix the setup", not "carry on".
-4. **Depth model (optional).** Without it a procedural depth map is used. For the real
-   Depth-Anything-V2-Small (99 MB): start with `DEPTH_AUTO_DOWNLOAD=true`, or place
-   `depth_anything_v2_vits.onnx` in `backend/models/`. Expect about 1.5 FPS on CPU.
+4. **Depth model (optional).** Only *Neural ONNX* mode needs it; without the file that mode reports
+   why and runs the fast heuristic instead. To get Depth-Anything-V2-Small (99 MB), start with
+   `DEPTH_AUTO_DOWNLOAD=true` (or `./run.py --model`), or place `depth_anything_v2_vits.onnx` in
+   `backend/models/`. Expect about 1.5 FPS on CPU; for an NVIDIA GPU see "GPU Execution Providers" in
+   the README.
 5. **Camera.** `hardware.camera_device_index` (default 0). The camera is held open by the
    backend, so other apps cannot use it while it runs.
 
 ### Configuration
 
-`backend/.env` (see `.env.example`): `SONAR_MOCK_MODE`, `SONAR_SAMPLE_RATE`, `SONAR_UDP_HOST`,
-`SONAR_UDP_PORT`, `SONAR_UDP_HZ`, `SONAR_WS_HZ`, `DEPTH_MODEL_PATH`, `DEPTH_AUTO_DOWNLOAD`,
-`EXPORTS_DIR`, `BLENDER_BIN`. Runtime settings live in `backend/config_state.json` (created on
+`backend/.env` (see `.env.example`): `SONAR_MOCK_MODE`, `SONAR_REAL_CAMERA`, `SONAR_SAMPLE_RATE`,
+`SONAR_UDP_HOST`, `SONAR_UDP_PORT`, `SONAR_UDP_HZ`, `SONAR_WS_HZ`, `SONAR_CAMERA_INDEX`,
+`DEPTH_MODEL_PATH`, `DEPTH_AUTO_DOWNLOAD`, `EXPORTS_DIR`, `BLENDER_BIN`. Runtime settings live in `backend/config_state.json` (created on
 the first change, git-ignored); delete it to reset to defaults.
 
 | Service | Port |
@@ -240,8 +245,9 @@ the first change, git-ignored); delete it to reset to defaults.
 
 ### Stopping
 
-`Ctrl+C` in each terminal. If a browser still has a stream open, the backend can take a
-while to exit; `kill -9 <pid>` is safe (find it with `ss -ltnp | grep :8000`).
+`Ctrl+C` in the terminal running `run.sh` / `run.py` stops both services, or `Ctrl+C` in each
+terminal if you started them by hand. The backend exits within about 2 s even with video streams
+open. If something is still holding a port, find it with `ss -ltnp | grep :8000`.
 
 ---
 
@@ -293,7 +299,7 @@ headset, PipeWire audio.
 | WebSocket telemetry | 20 Hz |
 | Dashboard at 1600×900 and 1280×720 | Fits the viewport exactly, no console errors |
 | Dashboard at 390×844 | Scrolls vertically, no horizontal overflow |
-| Blender extension against the live backend | Receives packets, builds the cloud, colour modes, ripple, flash and clean stop all work |
+| Blender extension against the live backend | Receives packets, builds the cloud, colour modes, ripple, flash and clean stop all work (receiver 1.0; replaced by the displaced-mesh receiver 2.0, tested separately) |
 
 ### Real hardware (webcam, laptop audio)
 
@@ -332,10 +338,12 @@ headset, PipeWire audio.
   at first, before the idle timeout takes over.
 - *Echo strength* on the dashboard is normalised to the strongest return, so it can read 100%
   on noise; trust the status badge and the depth stability instead.
-- The mock backend sends 30 to 50 UDP packets per second rather than 60 on a loaded machine.
+- The Blender stream sends one frame per vision frame, so its rate is the camera's rate (15 FPS on
+  the test webcam; 7.5 in a later session, most likely from low-light exposure), not 60.
 - There is no CI yet. The backend has unit tests (`cd backend && .venv/bin/python -m pytest tests`,
-  needs `requirements-dev.txt`) covering unprojection, camera pose, the hybrid equation, depth
-  modes and camera fallback; the rest was checked by hand.
+  needs `requirements-dev.txt`) covering unprojection, camera pose, the hybrid equation, depth modes,
+  subject isolation, camera fallback, the neural worker lifecycle and the Blender stream protocol;
+  the dashboard and the Blender extension were checked by hand and with headless scripts.
 - The draggable rig editor, multi-mic (GCC-PHAT) and autopilot UI from `ROADMAP.md` phases 4
   and 6 are not built yet. See "What's next" in `ROADMAP.md`.
 - The fast heuristic is a cue-based approximation, not true depth; use the neural mode (or a

@@ -3,13 +3,12 @@ build_template.py — generates blender/template_exhibition.blend (Blender 4.2+ 
 
     blender --background --factory-startup --python blender/build_template.py
 
-Contents: empty ``SonarPointCloud`` mesh (with a ``Col`` attribute and a point-instancing
-Geometry Nodes modifier, driven live by the sonar_imaging extension), ``SonarTarget`` empty,
-``SonarPing`` ring, ``ExhibitionFloor``, a 3-point light rig and ``StudioCamera``.
-export_static_scene.py reuses these by name.
+Contents: ``ExhibitionFloor``, a 3-point light rig and ``StudioCamera``, which
+export_static_scene.py reuses by name, plus the legacy ``SonarPointCloud`` / ``SonarTarget`` /
+``SonarPing`` objects that the exporter hides. (The live Blender view is the sonar_imaging
+extension, which builds its own ``Sonar_Displacement_Mesh``; it does not use this template.)
 """
 
-import math
 import os
 import sys
 
@@ -37,7 +36,7 @@ for engine in ("BLENDER_EEVEE", "BLENDER_EEVEE_NEXT"):
     except TypeError:
         continue
 
-# Live point cloud placeholder + point instancer.
+# Legacy point cloud placeholder + point instancer (hidden by export_static_scene.py).
 mat = common.make_vertex_color_material()
 pc_mesh = bpy.data.meshes.new("SonarPointCloud")
 pc_mesh.materials.append(mat)
@@ -51,7 +50,7 @@ target.empty_display_type = "SPHERE"
 target.empty_display_size = 0.1
 link(target)
 
-# Ping ring (circle outline, scaled by the sonar_imaging extension on each ping).
+# Ping ring (legacy; hidden by export_static_scene.py).
 ring_mesh = bpy.data.meshes.new("SonarPing")
 bm = bmesh.new()
 bmesh.ops.create_circle(bm, cap_ends=False, radius=1.0, segments=96)

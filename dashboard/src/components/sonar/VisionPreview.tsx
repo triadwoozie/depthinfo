@@ -289,6 +289,18 @@ function MjpegView({
     return () => clearInterval(timer)
   }, [attempt, loaded, failed])
 
+  // An MJPEG <img> keeps its multipart download open even after it leaves the DOM, so each
+  // retry or tab switch would leave a stream running on the backend. Removing the src
+  // attribute aborts the request (and, per the HTML spec, fires no error event).
+  useEffect(() => {
+    const img = imgRef.current
+    return () => {
+      if (!img) return
+      img.dataset.closing = "1"
+      img.removeAttribute("src")
+    }
+  }, [attempt])
+
   // A dropped MJPEG connection never recovers on its own: retry with a fresh URL.
   useEffect(() => {
     if (!failed) return
@@ -310,7 +322,8 @@ function MjpegView({
           alt={alt}
           className={`h-full w-full object-contain ${loaded ? "opacity-100" : "opacity-0"}`}
           onLoad={() => setLoaded(true)}
-          onError={() => {
+          onError={(event) => {
+            if (event.currentTarget.dataset.closing) return // our own abort, not a failure
             setLoaded(false)
             setFailed(true)
           }}
@@ -507,6 +520,9 @@ function CloudView() {
       gl.deleteProgram(program)
       gl.deleteShader(vertexShader)
       gl.deleteShader(fragmentShader)
+      // Browsers cap live WebGL contexts (~16); each tab switch remounts this view, so release
+      // the context now instead of waiting for garbage collection.
+      gl.getExtension("WEBGL_lose_context")?.loseContext()
     }
   }, [])
 

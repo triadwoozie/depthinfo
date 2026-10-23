@@ -28,19 +28,27 @@
 | Loudspeaker | Full-range capable of 16–21 kHz output |
 | Audio Interface | ≥ 2 in / 2 out, 48 kHz, ≥ 24-bit (e.g. Focusrite Scarlett, MOTU) |
 | Camera | Any USB/CSI webcam; wide-angle (60–80° FOV) preferred |
-| Computer | Python 3.11+, Node.js 18+, Blender 4.x (optional for live view) |
+| Computer | Python 3.11 or 3.12 (3.13+ lacks wheels for the pinned packages), Node.js 18+, Blender 4.2+ (optional, for the live view and exports) |
 
 ## Quick Start
 
 > Step-by-step setup, real-hardware notes, troubleshooting and a real-world test log: **[`GETTING_STARTED.md`](GETTING_STARTED.md)**.
 
+One command starts both services and stops both on Ctrl+C:
+
+```bash
+./run.sh --setup --mock     # first run (creates the venv, installs packages); then ./run.sh --mock
+```
+
+The manual steps:
+
 ### 1. Backend
 
 ```bash
 cd backend
+python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt
 cp .env.example .env        # set SONAR_MOCK_MODE=true for no-hardware testing
-pip install -r requirements.txt
-python main.py               # or: python main.py --mock
+.venv/bin/python main.py     # or: .venv/bin/python main.py --mock
 ```
 
 Backend health check: `curl http://localhost:8000/healthz`
@@ -49,7 +57,7 @@ Backend health check: `curl http://localhost:8000/healthz`
 
 ```bash
 cd dashboard
-npm install
+npm ci
 npm run dev                  # → http://localhost:3000
 ```
 
@@ -59,15 +67,16 @@ The receiver is a Blender 4.2+ / 5 **extension** in `blender/sonar_imaging/`.
 
 ```bash
 blender --command extension build --source-dir blender/sonar_imaging --output-dir .
-# → sonar_imaging_receiver-1.0.0.zip
+# → sonar_imaging_receiver-2.0.1.zip
 ```
 
 1. In Blender: **Edit ▸ Preferences ▸ Get Extensions ▸ ⌄ ▸ Install from Disk…** and pick the zip
 2. In the 3D Viewport press **N** → **Sonar Imaging** tab
-3. **Create Sonar Cloud Mesh**, then **Start Receiver** (UDP `127.0.0.1:5005`, matches the backend)
+3. **Create Displaced Mesh**, then **Start Receiver** (UDP `127.0.0.1:5005`, matches the backend)
 
-The panel also controls point size, wave ripple / ping flash and the colour override.
-The backend sends `ping_pulse = 1` once per fresh chirp echo, which drives the flash.
+The backend streams a subject-isolated depth map and the camera colours; a Geometry Nodes modifier
+displaces a dense grid with them, so the subject appears as a connected 3D surface with the background
+removed. The panel sets the grid resolution, relief depth, background cutoff and a wireframe overlay.
 
 ---
 
@@ -95,8 +104,17 @@ and GPU driver alone are not sufficient to enable ONNX Vulkan inference. On this
 machine, `vulkaninfo` detects the Radeon 680M, but `onnxruntime.get_available_providers()` reports
 only Azure and CPU. PyPI has no `onnxruntime-vulkan` distribution; Vulkan requires an ONNX Runtime
 build compiled with the Vulkan execution provider. For NVIDIA, use a CUDA-enabled ONNX Runtime
-build compatible with the installed CUDA/cuDNN libraries instead of the base package. Always
-verify with:
+build compatible with the installed CUDA/cuDNN libraries instead of the base package. Without a
+system CUDA toolkit, the pip wheels can supply the libraries; this was verified on an RTX 3050 Laptop
+GPU (driver CUDA 13.4), where neural depth ran at about 19 FPS against 1.5 FPS on CPU:
+
+```bash
+backend/.venv/bin/pip uninstall -y onnxruntime
+backend/.venv/bin/pip install "onnxruntime-gpu[cuda,cudnn]"
+```
+
+The backend calls `onnxruntime.preload_dlls()` before creating the session, which is what makes those
+pip-installed libraries loadable. Always verify with:
 
 ```bash
 backend/.venv/bin/python -c "import onnxruntime as ort; print(ort.get_available_providers())"
@@ -130,6 +148,9 @@ Controlled by dashboard sliders for `min_scan_distance_m`, `max_scan_distance_m`
 ---
 
 ## Mesh Colour Modes
+
+These apply to the dashboard's 3D preview and to exported scenes; the live Blender receiver always
+uses the camera colours.
 
 | Mode | Description |
 |---|---|
@@ -170,16 +191,15 @@ Click **"Export Static .blend Scene"** in the dashboard:
 
 **Backend:** Python 3.11, FastAPI, `sounddevice`, `scipy`, `numpy`, `opencv-python`, `onnxruntime`, `open3d`, `pydantic-settings`
 
-**Dashboard:** Next.js 14, TypeScript, Tailwind CSS, `shadcn/ui` (new-york style, zinc-950 dark theme)
+**Dashboard:** Next.js 14, TypeScript, Tailwind CSS, `shadcn/ui` (new-york style, zinc dark theme)
 
-**3D / Blender:** Blender 4.x Python API (`bpy`), Geometry Nodes, Cycles / EEVEE
+**3D / Blender:** Blender 4.2+ / 5.x Python API (`bpy`), Geometry Nodes, Cycles / EEVEE
 
-**AI Depth Model:** Depth-Anything-V2-Small (ViT-S, ONNX, ~24 MB checkpoint)
+**AI Depth Model:** Depth-Anything-V2-Small (ViT-S, ONNX, about 99 MB fp32; downloaded on demand)
 
 ---
 
-## Experimental: Multi-Mic TDOA Array
+## Planned: Multi-Mic TDOA Array
 
-Enable in the dashboard's **Experimental** tab to use 2–4 studio microphones for GCC-PHAT acoustic triangulation. Renders a live **Acoustic Polar Radar** showing directional sound lobes and echo hotspots overlaid on the 3D scene.
-
-See [`AGENTS.md § 3.5`](AGENTS.md) for the complete GCC-PHAT mathematical specification.
+**Not built yet.** The plan is GCC-PHAT triangulation across 2–4 microphones with a live acoustic polar
+radar in the dashboard (ROADMAP Phase 6). The specification is in [`AGENTS.md § 3.5`](AGENTS.md).

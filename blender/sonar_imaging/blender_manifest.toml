@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "sonar_imaging_receiver"
-version = "2.0.0"
+version = "2.0.1"
 name = "Sonar Imaging Live Receiver"
 tagline = "Live 3D subject scan as a displaced mesh over UDP"
 maintainer = "Sonar Imaging Team <sonar-imaging@example.com>"

@@ -291,3 +291,44 @@ def test_substituted_camera_does_not_reopen_in_a_loop(monkeypatch):
         assert FlakyCapture.instances == opened_after_settling  # no reopen churn
     finally:
         grabber.stop()
+
+
+# ---------------------------------------------------------------------------
+# Neural worker lifetime: GPU/CPU memory must not stay pinned once neural mode is off
+# ---------------------------------------------------------------------------
+
+def test_failed_neural_worker_is_released_when_mode_changes(monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "depth_model_path", str(tmp_path / "missing.onnx"))
+    monkeypatch.setattr(settings, "depth_auto_download", False)
+    pipe = depth_ai.VisionPipeline(lambda: None)
+    img, _ = scene_with_disk()
+    deadline = time.time() + 5
+    while pipe.neural.state != "error" and time.time() < deadline:
+        pipe._relative_depth(img, "neural_onnx")
+        time.sleep(0.05)
+    failed = pipe.neural
+    assert failed.state == "error"
+    pipe._relative_depth(img, "lightweight_fast")      # switching away frees it immediately...
+    assert pipe.neural is not failed and pipe.neural.state == "idle"
+    assert failed._thread is None or not failed._thread.is_alive()
+
+
+def test_loaded_neural_worker_is_kept_briefly_then_released(monkeypatch):
+    pipe = depth_ai.VisionPipeline(lambda: None)
+    img, _ = scene_with_disk()
+
+    class LoadedWorker(depth_ai.NeuralDepthWorker):   # stands in for a loaded model, no ONNX needed
+        stopped = False
+        def stop(self):
+            LoadedWorker.stopped = True
+
+    loaded = LoadedWorker()
+    loaded.state = "ready"
+    pipe.neural = loaded
+    pipe._neural_last_used = time.monotonic()
+    pipe._relative_depth(img, "lightweight_fast")
+    assert pipe.neural is loaded and not LoadedWorker.stopped            # within the grace period
+    monkeypatch.setattr(depth_ai, "NEURAL_IDLE_RELEASE_S", 0.0)
+    pipe._relative_depth(img, "lightweight_fast")
+    assert pipe.neural is not loaded and LoadedWorker.stopped            # released afterwards
+    assert pipe.neural.state == "idle"

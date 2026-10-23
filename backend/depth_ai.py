@@ -61,6 +61,9 @@ MODEL_URL = (
 MODEL_INPUT = 518
 BG_MASK_PATH = BACKEND_DIR / "calibration_bg_mask.npy"   # median D_rel of the empty scene (Round 3)
 BG_GRAY_PATH = BACKEND_DIR / "calibration_bg_gray.npy"   # median 160x120 grey frame (Round 3)
+# Free the ONNX session (and its GPU memory) once neural mode has been off this long; the delay
+# avoids reloading the model when the operator only flicks between modes.
+NEURAL_IDLE_RELEASE_S = 30.0
 FRAME_W, FRAME_H = 640, 480
 SMALL_W, SMALL_H = 160, 120
 _IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
@@ -692,6 +695,7 @@ class VisionPipeline:
             use_real=(not settings.mock_mode) or settings.real_camera,
         )
         self.neural = NeuralDepthWorker()
+        self._neural_last_used = 0.0  # monotonic time neural mode was last requested
         self.bg_depth: np.ndarray | None = None
         self.bg_gray: np.ndarray | None = None
         self.depth_mode_active = "lightweight_fast"
@@ -820,10 +824,24 @@ class VisionPipeline:
             log(f"pipeline crashed: {exc}")
             raise
 
+    def _release_neural(self) -> None:
+        """Stop the neural worker so its ONNX session (and GPU memory) is freed; a fresh, idle
+        worker takes its place and only loads the model again if neural mode is re-selected.
+        This also lets a failed load (e.g. missing model file) be retried later."""
+        old, self.neural = self.neural, NeuralDepthWorker()
+        old.stop()
+
     def _relative_depth(self, frame: np.ndarray, mode: str) -> np.ndarray:
         """Run the requested mode, falling back (and saying so) when it cannot run."""
         t0 = time.perf_counter()
         self.depth_error = None
+        now = time.monotonic()
+        if mode == "neural_onnx":
+            self._neural_last_used = now
+        elif self.neural.state == "error" or (
+            self.neural.state == "ready" and now - self._neural_last_used > NEURAL_IDLE_RELEASE_S
+        ):
+            self._release_neural()
         if mode == "disabled":
             d, self.depth_mode_active = flat_relative_depth(frame.shape[:2]), "disabled"
         elif mode == "neural_onnx":

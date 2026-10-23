@@ -123,10 +123,11 @@ def port_busy(port: int) -> bool:
 
 def spawn(name: str, cmd: list[str], cwd: Path, env: dict[str, str]) -> subprocess.Popen:
     LOGS.mkdir(exist_ok=True)
-    log = open(LOGS / f"{name}.log", "w")
     # Own session/process group so the whole tree (npm -> next, python threads) can be signalled.
-    proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=log, stderr=subprocess.STDOUT,
-                            start_new_session=True)
+    # The child gets its own copy of the log descriptor, so ours is closed right away.
+    with open(LOGS / f"{name}.log", "w") as log:
+        proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=log, stderr=subprocess.STDOUT,
+                                start_new_session=True)
     children.append((name, proc))
     return proc
 

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
 import os
 import time
@@ -161,6 +162,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     task = asyncio.create_task(_telemetry_task())
     yield
     task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
     bridge.stop()
     vision.stop()
     sonar.stop()
@@ -454,6 +457,7 @@ async def healthz() -> JSONResponse:
         "vertex_count": stitcher.vertex_count,
         "blender": find_blender(),
         "udp_sent": bridge.sent_count,
+        "udp_dropped": bridge.dropped_count,  # frames dropped because the OS send buffer was full
     })
 
 

@@ -85,6 +85,8 @@ export function useSonarSocket(): SonarSocketState {
   // WebSocket ref (stable across renders)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Set on unmount so a closing socket cannot schedule a reconnect for a component that is gone.
+  const disposedRef = useRef(false)
 
   // Calibration debounce
   const pendingCalibrationRef = useRef<Partial<CalibrationState>>({})
@@ -186,7 +188,10 @@ export function useSonarSocket(): SonarSocketState {
   // ---------------------------------------------------------------------------
 
   const connect = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) return
+    if (disposedRef.current) return
+    const current = wsRef.current
+    // CONNECTING counts too: opening a second socket here would leak the first one.
+    if (current && (current.readyState === WebSocket.OPEN || current.readyState === WebSocket.CONNECTING)) return
 
     const ws = new WebSocket(WS_URL)
     wsRef.current = ws
@@ -202,9 +207,10 @@ export function useSonarSocket(): SonarSocketState {
     }
 
     ws.onclose = () => {
-      setConnected(false)
+      if (wsRef.current !== ws) return // a superseded socket must not clobber the live one
       wsRef.current = null
-      // Schedule reconnect
+      setConnected(false)
+      if (disposedRef.current) return
       reconnectTimerRef.current = setTimeout(connect, RECONNECT_DELAY_MS)
     }
 
@@ -254,6 +260,7 @@ export function useSonarSocket(): SonarSocketState {
 
   useEffect(() => {
     let active = true
+    disposedRef.current = false
     fetch(`${API_BASE}/api/config`)
       .then(async (response) => {
         if (!response.ok) {
@@ -272,10 +279,17 @@ export function useSonarSocket(): SonarSocketState {
     connect()
     return () => {
       active = false
+      disposedRef.current = true
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current)
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
       if (configTimerRef.current) clearTimeout(configTimerRef.current)
-      wsRef.current?.close()
+      reconnectTimerRef.current = debounceTimerRef.current = configTimerRef.current = null
+      const ws = wsRef.current
+      wsRef.current = null
+      if (ws) {
+        ws.onopen = ws.onmessage = ws.onerror = ws.onclose = null
+        ws.close()
+      }
     }
   }, [applySystemConfig, connect])
 

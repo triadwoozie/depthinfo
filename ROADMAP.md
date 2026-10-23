@@ -10,9 +10,11 @@ Each phase is self-contained and includes strict acceptance criteria. Agents mus
 
 **Done:** Phases 1, 2, 3 and 5 (backend, DSP, fog map, stitcher, headless export, Blender
 extension). Phase 4 is largely done: stock shadcn dashboard, live streams, depth-mode selector,
-the guided 4-round calibration wizard and export. The hybrid sonar + vision depth model, true
-per-pixel unprojection, the camera grabber thread with real fallback, `run.py`/`run.sh` and 16
-backend unit tests are in.
+subject-isolation controls, the guided 4-round calibration wizard and export. Also in: the hybrid
+sonar + vision depth model with a subject-anchored percentile, true per-pixel unprojection, subject
+isolation (background culling), CUDA neural depth, the camera grabber thread with real fallback, the
+Blender displaced-mesh receiver (chunked depth-frame stream), `run.py`/`run.sh`, and 49 backend unit
+tests.
 
 **Next, in priority order:**
 
@@ -25,9 +27,10 @@ backend unit tests are in.
    (point cloud, Poisson, ball-pivoting) and fog-colormap controls; a visible WebSocket latency badge.
 4. **Phase 6.** Multi-mic GCC-PHAT and `MultiMicLab`; dashboard `AUTOPILOT` badge and optional
    snapshot replay.
-5. **Better hybrid depth.** Per-region sonar anchoring instead of one cone median, a confidence
-   term, temporal smoothing of `D_rel`, GPU execution providers or a smaller input size for the
-   neural model.
+5. **Better hybrid depth.** Per-region sonar anchoring instead of one cone percentile, a confidence
+   term, temporal smoothing of `D_rel`, Vulkan/ROCm ONNX Runtime builds or a smaller input size for
+   the neural model, and validating subject isolation on real people (it was measured on synthetic
+   ground truth).
 6. **Access and security.** Configurable CORS and API address for LAN use, authentication,
    HTTPS.
 7. **Portability.** Windows support for the run scripts, a Docker image for the backend.
@@ -45,6 +48,9 @@ backend unit tests are in.
 - `backend/main.py` *(replace stub)*
 - `dashboard/src/types/schema.ts` *(replace stub)*
 - `dashboard/src/hooks/useSonarEngine.ts`
+
+*As built:* the schema mirror is `dashboard/src/types/sonar.ts` and the hook is
+`dashboard/src/hooks/useSonarSocket.ts`.
 
 ### Tasks
 
@@ -126,7 +132,7 @@ curl -X POST http://localhost:8000/api/calibration/round/2
 
 ### Tasks
 
-1. **`backend/depth_ai.py`** — Load Depth-Anything-V2-Small via `onnxruntime`. Include an automatic ONNX weight downloader (from HuggingFace Hub). Provide a deterministic procedural fallback depth map for offline / CI environments (concentric distance rings centred on frame midpoint).
+1. **`backend/depth_ai.py`** — Load Depth-Anything-V2-Small via `onnxruntime`. Include an automatic ONNX weight downloader (from HuggingFace Hub). Provide an offline / CI fallback. *As built:* the CPU `lightweight_fast` heuristic (the original concentric-ring procedural map was replaced, see `AGENTS.md` § 3.2).
 
 2. **Real-Time Fog Map Generator** — Per `AGENTS.md § 3.2`:
    - Anchor relative depth to `Z_sonar` via metric formula
@@ -181,6 +187,10 @@ curl -X PATCH http://localhost:8000/api/config \
 - `dashboard/src/components/experimental/MultiMicLab.tsx`
 - `dashboard/src/app/page.tsx`
 
+*As built:* the panels live in `dashboard/src/components/sonar/` (`RigCanvas`, `AcousticSynthPanel`,
+`CorrelationCanvas`, `VisionPreview`, `CalibrationWizard`, `CalibrationPanel`, `ExportDrawer`,
+`TelemetryHeader`). `MultiMicLab` is not built yet (Phase 6).
+
 ### Tasks
 
 1. **Top Device & Telemetry Bar** — `<Select>` dropdowns (Speaker, Mic, Camera populated from `GET /api/devices`). Live `<Badge>` readouts: Sonar Depth (m), Vision FPS, WS RTT, Mock Mode indicator.
@@ -224,9 +234,9 @@ curl -X PATCH http://localhost:8000/api/config \
 
 ### Tasks
 
-1. **`backend/blender_udp.py`** — Pack `(points, colors, sonar_z, ping_pulse, audio_energy, color_mode)` into UDP JSON packets (≤ 8192 bytes). Truncate points array if necessary. Non-blocking `socket.setblocking(False)`.
+1. **`backend/blender_udp.py`** — Per new vision frame, send the subject-isolated 320×240 nearness map and a half-resolution RGB plane as 32 KB UDP chunks (wire format in `AGENTS.md` § 4.4). Non-blocking socket; a frame that cannot be sent is dropped, never queued.
 
-2. **`blender/sonar_imaging/`** — extension; `bpy.app.timers` at 0.016 s. Drain full socket buffer; keep only latest packet. Update the `SonarCloud` mesh vertices and `Col` FloatColorAttribute in-place. Drive the `SonarTarget` empty from `sonar_z`.
+2. **`blender/sonar_imaging/`** — extension; `bpy.app.timers` at 0.016 s. Drain the socket, reassemble chunks, keep only the newest complete frame, write it into the `Sonar_Depth_Texture` / `Sonar_Color_Texture` float images, and let the `Sonar_Displace` Geometry Nodes modifier displace the `Sonar_Displacement_Mesh` grid (frustum warp, `Optical_Color` attribute, background deleted).
 
 3. **`blender/export_static_scene.py`** — CLI args: `--input temp.ply --output scan_<ts>.blend --color_mode <mode>`. Import PLY, create `Col` colour attribute, build full ShaderNodeTree, add atmospheric volume world shader matching dashboard fog settings, position isometric studio camera and 3-point HDRI rig. Export `.blend` + `.glb` + `.ply`.
 

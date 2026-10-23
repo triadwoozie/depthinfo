@@ -56,7 +56,8 @@ class Receiver:
         self._win_start = time.monotonic()
         self._win_count = 0
         self._last_redraw = 0.0
-        self._applied = {}
+        self._applied = {}          # last values pushed to the modifier...
+        self._applied_to = None     # ...and which modifier they were pushed to
         self._error_shown = False
 
     # -- lifecycle ---------------------------------------------------------
@@ -161,6 +162,10 @@ class Receiver:
             _set_image(color_img, cw, ch, SRGB_TO_LINEAR[frame.rgb])
         self.apply_params(settings, obj)
 
+    def forget_applied(self):
+        """Call when the modifier is rebuilt: its inputs are back at their defaults."""
+        self._applied, self._applied_to = {}, None
+
     def apply_params(self, settings, obj=None):
         """Push relief / cutoff / frustum parameters to the modifier (only values that changed)."""
         obj = obj or bpy.data.objects.get(OBJECT_NAME)
@@ -181,6 +186,8 @@ class Receiver:
             "Half Width": plane * math.tan(math.radians(fov) / 2.0),
             "Aspect": aspect,
         }
+        if self._applied_to != mod.as_pointer():  # a different modifier: its inputs are at defaults
+            self._applied, self._applied_to = {}, mod.as_pointer()
         for name, value in values.items():
             if self._applied.get(name) != value:
                 nodes.set_modifier_input(mod, name, value)

@@ -35,7 +35,6 @@ class SonarSettings(BaseSettings):
 
     mock_mode: bool = Field(default=False, alias="SONAR_MOCK_MODE")
     sample_rate: int = Field(default=48000, alias="SONAR_SAMPLE_RATE")
-    audio_device_index: int | None = Field(default=None, alias="SONAR_AUDIO_DEVICE")
     udp_host: str = Field(default="127.0.0.1", alias="SONAR_UDP_HOST")
     udp_port: int = Field(default=5005, alias="SONAR_UDP_PORT")
     udp_hz: float = Field(default=60.0, alias="SONAR_UDP_HZ")
@@ -104,8 +103,10 @@ class HardwareConfig(_Model):
     output_audio_device_id: int | None = None
     input_audio_device_name: str | None = None
     output_audio_device_name: str | None = None
-    camera_device_index: int = 0
-    sample_rate_hz: int = Field(default=48000, ge=8000, le=192000)
+    # SONAR_CAMERA_INDEX / SONAR_SAMPLE_RATE seed these defaults; a value saved in
+    # config_state.json (e.g. picked in the dashboard) takes precedence.
+    camera_device_index: int = Field(default_factory=lambda: settings.camera_index, ge=0)
+    sample_rate_hz: int = Field(default_factory=lambda: settings.sample_rate, ge=8000, le=192000)
     camera_fov_deg: float = Field(default=65.0, gt=10.0, lt=170.0)
     camera_pose: Pose = Field(default_factory=Pose)
     speaker_pose: Pose = Field(default_factory=lambda: Pose(x_cm=-15.0, y_cm=-10.0))

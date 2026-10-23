@@ -15,7 +15,6 @@ Blender's Z-up frame as (x, z, y).
 """
 
 import argparse
-import math
 import os
 import sys
 import traceback

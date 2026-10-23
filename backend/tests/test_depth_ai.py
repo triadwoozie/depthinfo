@@ -93,3 +93,15 @@ def test_uses_cpu_when_no_accelerator_is_available(monkeypatch):
     assert len(runtime.attempts) == 1
     assert runtime.attempts[0][0] == ["CPUExecutionProvider"]
     assert session.get_providers() == ["CPUExecutionProvider"]
+
+
+def test_env_settings_seed_the_hardware_defaults(monkeypatch):
+    """SONAR_CAMERA_INDEX / SONAR_SAMPLE_RATE must actually take effect (they used to be ignored)."""
+    from config import SystemConfig, settings
+
+    monkeypatch.setattr(settings, "camera_index", 2)
+    monkeypatch.setattr(settings, "sample_rate", 44100)
+    hw = SystemConfig().hardware
+    assert hw.camera_device_index == 2 and hw.sample_rate_hz == 44100
+    saved = SystemConfig.model_validate({"hardware": {"camera_device_index": 0, "sample_rate_hz": 48000}})
+    assert saved.hardware.camera_device_index == 0 and saved.hardware.sample_rate_hz == 48000  # saved wins

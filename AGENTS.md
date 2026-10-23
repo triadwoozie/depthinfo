@@ -7,37 +7,44 @@
 ## 1. Repository Layout & Service Boundaries
 
 ```text
-sonar-imaging/
-├── AGENTS.md                           # Master technical spec (this file)
-├── README.md                           # Operator manual & hardware setup guide
-├── ROADMAP.md                          # Phased implementation checklist
-├── backend/                            # Python 3.11+ FastAPI Core Engine (Port 8000)
-│   ├── main.py                         # ASGI server, REST endpoints, WS broadcaster
-│   ├── config.py                       # Pydantic V2 state schemas & JSON persistence
-│   ├── devices.py                      # PortAudio & OpenCV hardware enumeration
-│   ├── sonar_dsp.py                    # Chirp synthesis, matched filter, GCC-PHAT (multi-mic)
-│   ├── depth_ai.py                     # Depth-Anything-V2-Small ONNX inference & Fog Map generator
-│   ├── stitcher.py                     # Multi-frame point cloud fusion & surface reconstruction
-│   ├── blender_udp.py                  # 60Hz UDP streamer to live Blender viewport (Port 5005)
-│   ├── blender_exporter.py             # Headless Blender subprocess runner for static .blend files
-│   └── exports/                        # Generated .blend, .glb, and .ply static assets
-├── dashboard/                          # Next.js + TypeScript + Tailwind + shadcn/ui (Port 3000)
+depthinfo/
+├── AGENTS.md                     # Technical spec (this file)
+├── README.md                     # Overview and quick start
+├── GETTING_STARTED.md            # Setup, hardware mode, troubleshooting, test log
+├── ROADMAP.md                    # Status, next steps, phase plan
+├── run.py / run.sh               # Start backend + dashboard; Ctrl+C stops both
+├── launch.sh                     # run.sh --real-camera
+├── backend/                      # Python 3.11/3.12 FastAPI engine (port 8000)
+│   ├── main.py                   # ASGI app: REST, WebSocket telemetry, MJPEG, export
+│   ├── config.py                 # Pydantic V2 settings + SystemConfig, persisted to config_state.json
+│   ├── devices.py                # PortAudio / OpenCV enumeration, stable audio-device names
+│   ├── sonar_dsp.py              # Chirp synthesis, matched filter, bi-static depth, rounds 1-2
+│   ├── depth_ai.py               # Camera grabber, depth modes, hybrid depth, fog map, Blender frame
+│   ├── stitcher.py               # Unprojection, temporal fusion, meshing, colour routing
+│   ├── blender_udp.py            # Depth-frame streamer to the Blender extension (UDP 5005)
+│   ├── blender_exporter.py       # Headless Blender runner for .blend / .glb / .ply export
+│   ├── models/                   # depth_anything_v2_vits.onnx (downloaded, git-ignored)
+│   ├── exports/                  # Export output (git-ignored)
+│   └── tests/                    # pytest suite (mock mode)
+├── dashboard/                    # Next.js 14 + TypeScript + Tailwind + shadcn/ui (port 3000)
 │   └── src/
-│       ├── components/
-│       │   ├── hardware/               # Device selectors & 3D/2D Rig Placement Canvas
-│       │   ├── acoustics/              # Frequency, waveform, volume & oscilloscope controls
-│       │   ├── vision/                 # Live Fog Map viewer, RGB feed, & scan distance slicers
-│       │   ├── calibration/            # 4-Round Interactive Calibration Wizard
-│       │   ├── blender/                # Color mode router, live preview, & static .blend exporter
-│       │   └── experimental/           # Multi-Mic TDOA polar radar & beamforming controls
-│       ├── hooks/
-│       │   └── useSonarEngine.ts       # WebSocket state sync & command dispatcher
-│       └── types/
-│           └── schema.ts               # Strict TypeScript mirror of backend/config.py
-└── blender/                            # Blender 4.x Python Scripts & Template Assets
-    ├── template_exhibition.blend       # Base scene with Geometry Nodes & exhibition lighting
-    ├── sonar_imaging/                  # Blender 4.2+/5 extension: UDP receiver + N-panel (blender_manifest.toml)
-    └── export_static_scene.py          # Headless script that builds & saves static .blend models
+│       ├── app/page.tsx          # Dashboard layout
+│       ├── components/sonar/     # Panels: rig, synth, vision, echo canvas, export, calibration wizard
+│       ├── components/ui/        # shadcn/ui primitives
+│       ├── hooks/useSonarSocket.ts  # Reconnecting WebSocket telemetry + config sync
+│       ├── lib/api.ts            # Backend URLs (NEXT_PUBLIC_API_URL)
+│       └── types/sonar.ts        # TypeScript mirror of SystemConfig and telemetry, adapters
+└── blender/
+    ├── sonar_imaging/            # Blender 4.2+/5 extension: displaced-mesh live receiver
+    │   ├── protocol.py           #   wire format + chunk reassembler (no bpy)
+    │   ├── nodes.py              #   "Sonar_Displace" Geometry Nodes tree + material
+    │   ├── receiver.py           #   UDP timer loop; writes the depth / colour textures
+    │   ├── operators.py, ui.py, properties.py, __init__.py
+    │   └── blender_manifest.toml
+    ├── export_static_scene.py    # Headless static scene builder (run by blender_exporter.py)
+    ├── build_template.py         # Regenerates template_exhibition.blend
+    ├── _sonar_common.py          # Helpers shared by the two scripts above
+    └── template_exhibition.blend # Base scene for exports
 ```
 
 ### Port Map
@@ -46,7 +53,7 @@ sonar-imaging/
 |---|---|---|---|
 | FastAPI Backend | `8000` | HTTP + WS | REST config, MJPEG streams, WebSocket telemetry |
 | Next.js Dashboard | `3000` | HTTP | Operator control panel |
-| Blender UDP Bridge | `5005` | UDP (local) | Live point-cloud → Blender viewport |
+| Blender UDP Bridge | `5005` | UDP (local) | Live depth frames → Blender displaced mesh |
 
 ---
 
@@ -103,18 +110,26 @@ where $L = \frac{k_{\text{peak}}}{F_s} \cdot v_{\text{sound}}$ (total acoustic p
 
 ---
 
-### 3.2 Real-Time Fog Map (Atmospheric Z-Depth Mist Pass)
+### 3.2 Relative Depth, Hybrid Metric Depth and the Fog Map (`depth_ai.py`)
 
-**Inference:** Depth-Anything-V2-Small (ViT-S ONNX checkpoint, input 518×518) → raw relative inverse depth $D_{\text{raw}}(u,v) \in [0,1]$.
+**Relative depth** $D_{\text{rel}}(u,v) \in [0,1]$, **0 = nearest**, chosen by `vision_and_fog.depth_inference_mode`:
 
-**Metric Anchoring:**
-$$Z_{\text{metric}}(u,v) = Z_{\text{sonar}} + \left(\bar{D}_{\text{fg}} - D_{\text{raw}}(u,v)\right) \cdot S_{\text{relief}}$$
+| Mode | Source |
+|---|---|
+| `disabled` | Constant map, so $Z = Z_{\text{sonar}}$ everywhere |
+| `lightweight_fast` | CPU cues at 160×120: difference from the calibrated empty background when captured, otherwise edge energy, brightness and a ground-plane prior; bilateral-smoothed. About 1 ms. A heuristic, not true depth |
+| `neural_onnx` | Depth-Anything-V2-Small (518×518) in a worker thread. Its inverse-depth output is normalised between the 2nd and 98th percentiles, optionally CLAHE-enhanced (`depth_contrast_enhance`), then $D_{\text{rel}} = 1 - \text{disparity}$ |
 
-where $\bar{D}_{\text{fg}}$ = median relative depth of the foreground ROI and $S_{\text{relief}}$ = `vision_and_fog.relief_depth_span_m`.
+A mode that cannot run reports `depth_error` and runs `lightweight_fast`; `depth_mode_active` is what really runs. The neural ONNX session is freed 30 s after neural mode was last selected.
 
-**Scan Distance Clipping:** Mask all pixels where $Z_{\text{metric}}(u,v) \notin [Z_{\min},\ Z_{\max}]$.
+**Hybrid metric depth** (the sonar anchors, vision supplies the relief):
+$$Z(u,v) = Z_{\text{sonar}} + \left(D_{\text{rel}}(u,v) - D_{\text{anchor}}\right) \cdot S_{\text{relief}}$$
 
-**Fog Falloff Equations** (output $I_{\text{fog}} \in [0, 255]$, near = bright):
+$D_{\text{anchor}}$ is the `anchor_percentile` (default 5th) percentile of $D_{\text{rel}}$ inside the acoustic beam cone of half-angle `acoustic_beam_deg`: the near side, because the sonar reports the nearest reflector, and a median would land on the background whenever the subject fills less than half the cone. $S_{\text{relief}}$ = `relief_depth_span_m`. When the empty background has been captured (Round 3), pixels that still match it are excluded.
+
+**Scan Distance Clipping:** Mask all pixels where $Z(u,v) \notin [Z_{\min},\ Z_{\max}]$.
+
+**Fog Falloff Equations** (output $I_{\text{fog}} \in [0, 255]$, near = bright; default `linear`):
 
 | Mode | Formula |
 |---|---|
@@ -123,6 +138,8 @@ where $\bar{D}_{\text{fg}}$ = median relative depth of the foreground ROI and $S
 | `squared` | $f = \exp\!\left(-\left(\rho \cdot \dfrac{Z - Z_{\min}}{Z_{\max} - Z_{\min}}\right)^2\right)$ |
 
 $I_{\text{fog}} = \lfloor f \cdot 255 \rfloor$, $\rho =$ `vision_and_fog.fog_density`.
+
+**Subject isolation** (3D cloud and Blender stream): a pixel is kept only if $Z$ is finite, $I_{\text{fog}}/255 >$ `fog_discard_threshold`, $Z \le Z_{\max}$ and $Z - Z_{\text{sonar}} \le$ `subject_thickness_m`.
 
 ---
 
@@ -137,7 +154,7 @@ $$\mathbf{P}_{3D}(u,v) = \mathbf{T}_{\text{cam}} \cdot Z_{\text{metric}}(u,v) \c
 3. Normal estimation oriented toward camera origin
 4. Surface reconstruction: Screened Poisson (depth=7) or Ball-Pivoting (BPA)
 
-**Temporal Accumulation:** Rolling ring buffer of `temporal_stitch_frames` frames; new frames registered against the previous frame via ICP (point-to-plane) when `acoustic_wave_distortion` > 0 (subject is moving).
+**Temporal Accumulation:** Rolling ring buffer of `temporal_stitch_frames` frames; new frames registered against the previous frame via ICP (point-to-plane) when `acoustic_wave_distortion` > 0 (subject is moving). Live views (`/api/pointcloud`, the dashboard 3D tab) use the newest single frame, which keeps true relief; the fused cloud (`?stitched=true`) is used for export. Surface meshing runs at most every 2 s live and is always rebuilt fresh for an export.
 
 ---
 
@@ -155,17 +172,19 @@ Triggered by `POST /api/export/blend`:
            --color_mode <optical_rgb|fog_gradient|acoustic_heatmap|custom_palette>
    ```
 3. `export_static_scene.py`:
-   - Imports PLY → `bpy.ops.import_mesh.ply()`
+   - Imports PLY → `bpy.ops.wm.ply_import()` and remaps the backend frame (x right, y up, z forward) to Blender's Z-up
    - Creates `bpy.types.FloatColorAttribute` named `"Col"`
    - Builds ShaderNodeTree: `ShaderNodeVertexColor("Col")` → `ShaderNodeBsdfPrincipled` → Material Output
    - Optionally adds `ShaderNodeVolumeScatter` world volume to simulate Fog Map atmosphere
-   - Positions isometric studio camera + 3-point HDRI lighting rig
-   - `bpy.ops.export_scene.gltf(filepath=..., export_format='GLB')`
+   - Positions an isometric orthographic studio camera and a 3-point area-light rig
+   - `bpy.ops.export_scene.gltf(filepath=..., export_format='GLB')` (a point cloud is baked to small cubes first, because glTF drops loose vertices)
    - `bpy.ops.wm.save_as_mainfile(filepath=..., compress=True)`
 
 ---
 
 ### 3.5 Experimental: Multi-Microphone GCC-PHAT Array
+
+> **Not implemented yet** (ROADMAP Phase 6). The config section `experimental_multi_mic` exists, but no GCC-PHAT code runs and `doa_azimuth_deg` is always `null`.
 
 **Enable condition:** `experimental_multi_mic.enabled == True` AND audio device has ≥ 2 input channels.
 
@@ -185,20 +204,45 @@ Intersect DoA cones with sonar range sphere $Z_{\text{sonar}}$ to obtain directi
 
 ## 4. Unified Data Contracts
 
-### 4.1 Master `SystemConfig` Schema (backend/config.py ↔ dashboard/src/types/schema.ts)
+### 4.1 Master `SystemConfig` Schema (`backend/config.py` ↔ `dashboard/src/types/sonar.ts`)
+
+Defaults, exactly as `SystemConfig().model_dump()` produces them. Audio devices default to `null` (system default); a device picked in the dashboard is saved by name and re-resolved at runtime, because PortAudio ids change between boots.
 
 ```json
 {
   "hardware": {
-    "input_audio_device_id": 1,
-    "output_audio_device_id": 2,
+    "input_audio_device_id": null,
+    "output_audio_device_id": null,
+    "input_audio_device_name": null,
+    "output_audio_device_name": null,
     "camera_device_index": 0,
     "sample_rate_hz": 48000,
     "camera_fov_deg": 65.0,
-    "camera_pose":  { "x_cm": 0.0,   "y_cm": 0.0,   "z_cm": 0.0, "pitch_deg": 0.0, "yaw_deg": 0.0, "roll_deg": 0.0 },
-    "speaker_pose": { "x_cm": -15.0, "y_cm": -10.0, "z_cm": 0.0, "pitch_deg": 0.0, "yaw_deg": 0.0 },
+    "camera_pose": {
+      "x_cm": 0.0,
+      "y_cm": 0.0,
+      "z_cm": 0.0,
+      "pitch_deg": 0.0,
+      "yaw_deg": 0.0,
+      "roll_deg": 0.0
+    },
+    "speaker_pose": {
+      "x_cm": -15.0,
+      "y_cm": -10.0,
+      "z_cm": 0.0,
+      "pitch_deg": 0.0,
+      "yaw_deg": 0.0,
+      "roll_deg": 0.0
+    },
     "microphones": [
-      { "channel": 0, "label": "Main Studio Condenser", "x_cm": 15.0, "y_cm": -10.0, "z_cm": 0.0, "polar_pattern": "cardioid" }
+      {
+        "channel": 0,
+        "label": "Main Studio Condenser",
+        "x_cm": 15.0,
+        "y_cm": -10.0,
+        "z_cm": 0.0,
+        "polar_pattern": "cardioid"
+      }
     ]
   },
   "acoustics": {
@@ -219,21 +263,22 @@ Intersect DoA cones with sonar range sphere $Z_{\text{sonar}}$ to obtain directi
     "smoothing_alpha": 0.25,
     "background_fog_captured": false,
     "ambient_noise_floor_rms": 0.012,
-    "calibration_round_completed": 0
+    "calibration_round_completed": 0,
+    "autopilot_timeout_sec": 10
   },
   "vision_and_fog": {
     "min_scan_distance_m": 0.35,
-    "max_scan_distance_m": 2.50,
+    "max_scan_distance_m": 2.5,
     "fog_falloff_curve": "linear",
     "fog_density": 1.2,
     "fog_colormap": "mist_grayscale",
     "relief_depth_span_m": 0.45,
+    "fog_discard_threshold": 0.12,
+    "subject_thickness_m": 0.3,
+    "depth_contrast_enhance": true,
     "depth_inference_mode": "lightweight_fast",
     "acoustic_beam_deg": 20.0,
     "anchor_percentile": 5.0,
-    "fog_discard_threshold": 0.12,
-    "subject_thickness_m": 0.30,
-    "depth_contrast_enhance": true,
     "temporal_stitch_frames": 5,
     "voxel_downsample_m": 0.01
   },
@@ -263,14 +308,23 @@ Intersect DoA cones with sonar range sphere $Z_{\text{sonar}}$ to obtain directi
   "mock_mode": false,
   "sonar_depth_m": 1.45,
   "peak_amplitude": 0.34,
-  "fps_vision": 30.0,
+  "fps_vision": 15.0,
   "fps_sonar_hz": 10.0,
   "active_vertex_count": 4821,
   "doa_azimuth_deg": null,
+  "depth_mode": "neural_onnx",
+  "depth_mode_active": "neural_onnx",
+  "depth_active_provider": "CUDAExecutionProvider",
+  "depth_model_fps": 15.0,
+  "depth_error": null,
+  "camera_source": "camera",
   "system_fps": 20.0,
+  "ping_rate_hz": 20.0,
   "correlation_curve": [0.0, 0.0, 0.12, 0.85, 0.04]
 }
 ```
+
+`status` is one of `tracking`, `idle`, `autopilot`, `mock`, `mock-idle`, `initialising`, `error`. `camera_source` is `camera`, `mock` or `mock-fallback` (camera failed; synthetic frames while it retries). `doa_azimuth_deg` stays `null` until the multi-mic work (§ 3.5) exists. On connect, and after every config change, the server also sends `{"type": "config_update", "config": SystemConfig}`. Clients send partial `SystemConfig` patches (or the legacy flat calibration keys) over the same socket.
 
 > `correlation_curve` is **exactly 256 normalised floats [0.0–1.0]** representing 0.0 m → 4.0 m. Stored in a `useRef` on the client; never in `useState`.
 
@@ -278,14 +332,18 @@ Intersect DoA cones with sonar range sphere $Z_{\text{sonar}}$ to obtain directi
 
 | Method | Route | Description |
 |---|---|---|
-| `GET` | `/api/devices` | PortAudio + OpenCV device enumeration |
+| `GET` | `/api/devices` | PortAudio + OpenCV device enumeration (`mock` when synthetic) |
 | `GET` | `/api/config` | Full `SystemConfig` JSON |
-| `PATCH` | `/api/config` | Partial update; broadcasts over WS within 50 ms |
-| `POST` | `/api/calibration/round/{1\|2\|3\|4}` | Execute calibration round |
-| `GET` | `/api/stream/rgb` | MJPEG — annotated camera feed @ 30 FPS |
-| `GET` | `/api/stream/fog` | MJPEG — live Fog Map (Z-depth mist) @ 30 FPS |
-| `POST` | `/api/export/blend` | Freeze + export `.blend` / `.glb` / `.ply` |
-| `GET` | `/healthz` | `{ ok, mock, ws_clients, sonar_status }` |
+| `PATCH` | `/api/config` | Deep-merge a partial update (422 if invalid); broadcast over WS |
+| `GET` / `POST` | `/api/calibration` | Legacy flat calibration view used by older clients |
+| `GET` | `/api/calibration/input-level` | 0.3 s microphone level: `rms`, `peak`, `dbfs`, `quality` |
+| `POST` | `/api/calibration/round/{1\|2\|3\|4}` | Run a calibration round (503 + `detail` on device failure) |
+| `GET` | `/api/stream/rgb` | MJPEG annotated camera feed (`/video_feed` is an alias) |
+| `GET` | `/api/stream/fog` | MJPEG Fog Map |
+| `GET` | `/api/pointcloud` | `?max_points=` (default 4000) `&stitched=` (default false): subsampled points + colours |
+| `POST` | `/api/export/blend` | Export `.blend` / `.glb` / `.ply`; 409 if one is already running |
+| `GET` | `/exports/<file>` | Download export output |
+| `GET` | `/healthz` | `ok`, `mock`, `ws_clients`, `sonar_status`, `sonar_error`, `vision_fps`, `camera_mock`, `camera_source`, `camera_error`, `depth_mode`, `depth_mode_active`, `depth_model` (`mode`, `active_provider`, `fps`), `depth_error`, `depth_ms`, `vertex_count`, `blender`, `udp_sent`, `udp_dropped` |
 
 ### 4.4 Blender depth-frame stream (`backend/blender_udp.py` → Blender extension, UDP 5005)
 
@@ -327,16 +385,16 @@ mesh is metric.
 - `detection_threshold` = 3× `ambient_noise_floor_rms` (clamped to [0.05, 0.5]).
 
 ### Round 3 — Optical Intrinsics, Exposure Lock & Background Fog Subtraction
-- Capture 30 depth frames of empty room with no subject present.
-- Build a static background depth mask: `bg_depth_map = median(frames)`.
-- Subsequent runtime frames subtract `bg_depth_map` before fog computation.
+- Capture 30 frames of the empty scene with no subject present.
+- Store the median relative depth (`calibration_bg_mask.npy`) and the median 160×120 grey frame (`calibration_bg_gray.npy`).
+- Afterwards, pixels whose grey value still matches the empty scene are excluded from the fog map, the 3D cloud and the Blender stream, and the fast heuristic uses the difference as its nearness cue.
 - Sets `calibration.background_fog_captured = true`.
 
 ### Round 4 — Multi-Point Metric Anchor (Linear Regression)
 - Operator places a flat target at known distances: **0.5 m, 1.5 m, 2.5 m**.
-- For each: record `Z_sonar` and median `D_raw` from AI depth model.
-- Fit `Z_metric = α · D_raw + β` via `numpy.polyfit(degree=1)`.
-- Sets `calibration.metric_scale_factor = α`, `calibration.metric_offset_m = β`.
+- For each (`POST /api/calibration/round/4` with `{"distance_m": d}`): record the raw sonar depth (current α/β undone) and the anchor relative depth.
+- Fit `true_distance = α · Z_sonar_raw + β` via `numpy.polyfit(degree=1)`. This calibrates the sonar's own scale and offset (fitting against `D_raw` would corrupt them, since § 3.1 uses the same α/β).
+- Sets `calibration.metric_scale_factor = α`, `calibration.metric_offset_m = β`. In mock mode a clean three-point sweep is synthesised.
 
 ---
 
@@ -353,11 +411,11 @@ Applied in both `stitcher.py` (live) and `export_static_scene.py` (baked):
 
 ---
 
-## 7. shadcn/ui Component Inventory (All Confirmed Present in Registry)
+## 7. shadcn/ui Component Inventory (`dashboard/src/components/ui/`)
 
 > **Dashboard agents:** import from `@/components/ui/<name>` — all primitives are pre-installed. Do NOT add Recharts, D3, or any SVG charting library for high-frequency data. Use raw `<canvas>` + `requestAnimationFrame` instead.
 
-| Component | Import Path | Used In |
+| Component | Import Path | Typical use |
 |---|---|---|
 | `<Slider>` | `@/components/ui/slider` | Fog range, chirp Hz, scan distance |
 | `<Card>` | `@/components/ui/card` | All panel containers |
@@ -372,6 +430,7 @@ Applied in both `stitcher.py` (live) and `export_static_scene.py` (baked):
 | `<Tooltip>` | `@/components/ui/tooltip` | Rig coordinate labels |
 | `<ToggleGroup>` | `@/components/ui/toggle-group` | Fog falloff curve picker |
 | `<Input>` | `@/components/ui/input` | Exact XYZ cm coordinate inputs |
+| `<Accordion>`, `<Alert>`, `<Label>`, `<Toggle>` | `@/components/ui/<name>` | Collapsible sections, status messages, form labels |
 
 ---
 
@@ -380,13 +439,14 @@ Applied in both `stitcher.py` (live) and `export_static_scene.py` (baked):
 | Variable | Default | Description |
 |---|---|---|
 | `SONAR_MOCK_MODE` | `false` | Synthetic data — no hardware required |
-| `SONAR_SAMPLE_RATE` | `48000` | Audio sample rate (Hz) |
+| `SONAR_SAMPLE_RATE` | `48000` | Default for `hardware.sample_rate_hz` (a saved config value wins) |
 | `SONAR_UDP_HOST` | `127.0.0.1` | Blender UDP target |
 | `SONAR_UDP_PORT` | `5005` | Blender UDP port |
-| `SONAR_UDP_HZ` | `60` | Blender update rate |
+| `SONAR_UDP_HZ` | `60` | How often the Blender bridge checks for a new frame (each frame is sent once) |
 | `SONAR_WS_HZ` | `20` | Dashboard telemetry rate |
-| `SONAR_CAMERA_INDEX` | `0` | OpenCV camera index |
+| `SONAR_CAMERA_INDEX` | `0` | Default for `hardware.camera_device_index` (a saved config value wins) |
 | `SONAR_REAL_CAMERA` | `false` | Use the real camera even when `SONAR_MOCK_MODE=true` |
 | `DEPTH_AUTO_DOWNLOAD` | `false` | Fetch the ONNX depth model on first use of `neural_onnx` |
 | `DEPTH_MODEL_PATH` | `models/depth_anything_v2_vits.onnx` | ONNX model file path |
-| `EXPORTS_DIR` | `backend/exports` | Static `.blend` / `.glb` / `.ply` output |
+| `EXPORTS_DIR` | `exports` | Export output; relative paths are under `backend/` (a value starting with `backend/` is repo-relative) |
+| `BLENDER_BIN` | auto-detected | Blender executable for exports (`PATH`, then `~/blender*/blender`) |

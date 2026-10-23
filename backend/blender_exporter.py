@@ -17,6 +17,7 @@ import asyncio
 import glob
 import os
 import shutil
+import signal
 import time
 from pathlib import Path
 
@@ -28,7 +29,7 @@ EXPORT_TIMEOUT_S = 180
 
 
 class ExportError(RuntimeError):
-    pass
+    """An export that could not be produced; the message is shown to the operator."""
 
 
 def find_blender() -> str | None:
@@ -48,6 +49,23 @@ def find_blender() -> str | None:
     return None
 
 
+async def _terminate(proc: asyncio.subprocess.Process) -> None:
+    """Kill the subprocess's whole process group and reap it, so nothing runs on or lingers as a
+    zombie."""
+    if proc.returncode is None:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+    await proc.wait()
+
+
+def _discard(*paths: Path) -> None:
+    """Remove the temp PLY and any partial outputs of a failed export."""
+    for path in paths:
+        path.unlink(missing_ok=True)
+
+
 async def export_scene(stitcher: Stitcher, cfg: SystemConfig) -> dict:
     """Freeze the stitched geometry and render it to .blend / .glb / .ply."""
     blender = find_blender()
@@ -63,6 +81,7 @@ async def export_scene(stitcher: Stitcher, cfg: SystemConfig) -> dict:
     try:
         n_vertices = await asyncio.get_running_loop().run_in_executor(None, stitcher.export_ply, temp_ply, cfg)
     except RuntimeError as exc:
+        temp_ply.unlink(missing_ok=True)
         raise ExportError(str(exc)) from exc
 
     template = BLENDER_DIR / "template_exhibition.blend"
@@ -83,17 +102,25 @@ async def export_scene(stitcher: Stitcher, cfg: SystemConfig) -> dict:
         "--fog_density", str(vf.fog_density),
         "--falloff", vf.fog_falloff_curve,
     ]
+    # Own process group, so a timeout or cancellation can stop Blender *and* anything it spawned
+    # (a surviving child would keep the output pipe open and hang the wait below).
     proc = await asyncio.create_subprocess_exec(
-        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, start_new_session=True
     )
     try:
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=EXPORT_TIMEOUT_S)
     except asyncio.TimeoutError:
-        proc.kill()
-        raise ExportError(f"Blender export timed out after {EXPORT_TIMEOUT_S}s")
+        await _terminate(proc)
+        _discard(temp_ply, blend, glb)
+        raise ExportError(f"Blender export timed out after {EXPORT_TIMEOUT_S}s") from None
+    except asyncio.CancelledError:  # the request went away: do not leave Blender running
+        await _terminate(proc)
+        _discard(temp_ply, blend, glb)
+        raise
     log = stdout.decode(errors="replace")
 
     if proc.returncode != 0 or not blend.exists():
+        _discard(temp_ply, blend, glb)
         tail = "\n".join(log.strip().splitlines()[-15:])
         raise ExportError(f"Blender exited with code {proc.returncode}:\n{tail}")
 

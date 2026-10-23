@@ -379,6 +379,8 @@ export interface SystemConfig {
     fog_discard_threshold: number
     depth_contrast_enhance: boolean
     acoustic_beam_deg: number
+    /** Percentile of D_rel in the beam cone pinned to Z_sonar (the near side: the subject). */
+    anchor_percentile: number
     fog_density: number
     fog_colormap: string
     relief_depth_span_m: number

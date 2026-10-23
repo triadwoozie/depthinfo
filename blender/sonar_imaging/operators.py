@@ -59,6 +59,7 @@ class SONAR_OT_create_displaced_surface(Operator):
         mod.node_group = group
         obj.show_wire = obj.show_all_edges = s.show_wireframe
 
+        receiver.RECEIVER.forget_applied()  # the new modifier starts at its interface defaults
         receiver.RECEIVER.apply_params(s, obj)
         context.view_layer.objects.active = obj
         obj.select_set(True)
