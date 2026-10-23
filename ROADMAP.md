@@ -188,7 +188,7 @@ curl -X PATCH http://localhost:8000/api/config \
 **Files to Build:**
 - `backend/blender_udp.py`
 - `backend/blender_exporter.py`
-- `blender/live_receiver.py` *(replace stub)*
+- `blender/sonar_imaging/` *(Blender extension: manifest, receiver, N-panel)*
 - `blender/export_static_scene.py`
 - `blender/template_exhibition.blend`
 
@@ -196,7 +196,7 @@ curl -X PATCH http://localhost:8000/api/config \
 
 1. **`backend/blender_udp.py`** — Pack `(points, colors, sonar_z, ping_pulse, audio_energy, color_mode)` into UDP JSON packets (≤ 8192 bytes). Truncate points array if necessary. Non-blocking `socket.setblocking(False)`.
 
-2. **`blender/live_receiver.py`** — `bpy.app.timers` at 0.016 s. Drain full socket buffer; keep only latest packet. Update `SonarPointCloud` mesh vertices and `Col` FloatColorAttribute in-place. Drive `SonarTarget` empty Z-location from `sonar_z`.
+2. **`blender/sonar_imaging/`** — extension; `bpy.app.timers` at 0.016 s. Drain full socket buffer; keep only latest packet. Update the `SonarCloud` mesh vertices and `Col` FloatColorAttribute in-place. Drive the `SonarTarget` empty from `sonar_z`.
 
 3. **`blender/export_static_scene.py`** — CLI args: `--input temp.ply --output scan_<ts>.blend --color_mode <mode>`. Import PLY, create `Col` colour attribute, build full ShaderNodeTree, add atmospheric volume world shader matching dashboard fog settings, position isometric studio camera and 3-point HDRI rig. Export `.blend` + `.glb` + `.ply`.
 
