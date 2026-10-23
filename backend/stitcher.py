@@ -230,7 +230,7 @@ class Stitcher:
         if len(V) == 0:
             return [], []
         idx = np.linspace(0, len(V) - 1, min(max_points, len(V))).astype(int)
-        return np.round(V[idx], 3).tolist(), np.round(C[idx], 2).tolist()
+        return np.round(V[idx].astype(np.float64), 3).tolist(), np.round(C[idx].astype(np.float64), 2).tolist()
 
     def export_ply(self, path: Path, cfg: SystemConfig | None = None) -> int:
         """Write the current cloud/mesh (with vertex colours) to ``path``. Returns vertex count."""

@@ -320,6 +320,17 @@ async def stream_fog() -> StreamingResponse:
 
 
 # ---------------------------------------------------------------------------
+# Point cloud preview (polled by the dashboard's 3D tab)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/pointcloud")
+async def pointcloud(max_points: int = 4000) -> JSONResponse:
+    points, colors = stitcher.sample(min(max(max_points, 1), 20000))
+    return JSONResponse({"count": len(points), "total": stitcher.vertex_count,
+                         "points": points, "colors": colors})
+
+
+# ---------------------------------------------------------------------------
 # Export
 # ---------------------------------------------------------------------------
 

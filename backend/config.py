@@ -19,7 +19,7 @@ import threading
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_settings import BaseSettings
 
 BACKEND_DIR = Path(__file__).resolve().parent
@@ -143,6 +143,12 @@ class VisionAndFogConfig(_Model):
     relief_depth_span_m: float = Field(default=0.45, ge=0.0, le=5.0)
     temporal_stitch_frames: int = Field(default=5, ge=1, le=60)
     voxel_downsample_m: float = Field(default=0.01, ge=0.001, le=0.5)
+
+    @model_validator(mode="after")
+    def _range_ordered(self) -> "VisionAndFogConfig":
+        if self.min_scan_distance_m >= self.max_scan_distance_m:
+            raise ValueError("min_scan_distance_m must be below max_scan_distance_m")
+        return self
 
 
 ColorMode = Literal["optical_rgb", "fog_gradient", "acoustic_heatmap", "custom_palette"]

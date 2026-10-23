@@ -84,6 +84,9 @@ class DepthEstimator:
         self.backend = "procedural"
         self._input_name = ""
         path = settings.depth_model_file
+        if settings.mock_mode:  # Rule 3: mock runs are deterministic and fast, never network-model backed
+            print("[depth_ai] Mock mode — using procedural depth map.")
+            return
         if not path.exists() and settings.depth_auto_download and ort is not None:
             try:
                 download_model(path)

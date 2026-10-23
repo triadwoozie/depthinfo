@@ -29,6 +29,8 @@ interface CorrelationCanvasProps {
   detectionThreshold: number
   /** Optional: current sonar depth in metres for the depth-marker line. */
   sonarDepthM?: number
+  /** Update the direct-path blanking range while dragging its handle. */
+  onBlankingChange?: (distanceCm: number) => void
   className?: string
 }
 
@@ -41,10 +43,12 @@ export function CorrelationCanvas({
   blankingDistanceCm,
   detectionThreshold,
   sonarDepthM,
+  onBlankingChange,
   className,
 }: CorrelationCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rafRef = useRef<number>(0)
+  const draggingBlankingRef = useRef(false)
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -63,25 +67,44 @@ export function CorrelationCanvas({
       const binW = W / BINS
 
       // 1. Clear
-      ctx.fillStyle = SONAR_COLORS.background
+      ctx.fillStyle = "rgba(9,9,11,0.72)"
       ctx.fillRect(0, 0, W, H)
 
-      // 2. Grid lines (subtle horizontal guides at 0.25, 0.5, 0.75)
-      ctx.strokeStyle = SONAR_COLORS.border
+      // 2. Subtle instrument grid
+      ctx.strokeStyle = "rgba(82,82,91,0.28)"
       ctx.lineWidth = 1
       ;[0.25, 0.5, 0.75].forEach((frac) => {
-        const y = H * (1 - frac)
+        const y = H * frac
         ctx.beginPath()
         ctx.moveTo(0, y)
         ctx.lineTo(W, y)
         ctx.stroke()
       })
+      for (let i = 1; i < 8; i++) {
+        const x = (W / 8) * i
+        ctx.beginPath()
+        ctx.moveTo(x, 0)
+        ctx.lineTo(x, H)
+        ctx.stroke()
+      }
 
       // 3. Zone A — blanking overlay (direct acoustic bleed)
       const blankingFraction = blankingDistanceCm / 100 / CURVE_RANGE_M
       const blankingX = Math.min(blankingFraction * W, W)
       ctx.fillStyle = SONAR_COLORS.blankingZone
       ctx.fillRect(0, 0, blankingX, H)
+      ctx.strokeStyle = "rgba(248,113,113,0.9)"
+      ctx.lineWidth = 1
+      ctx.setLineDash([3, 4])
+      ctx.beginPath()
+      ctx.moveTo(blankingX, 0)
+      ctx.lineTo(blankingX, H)
+      ctx.stroke()
+      ctx.setLineDash([])
+      ctx.fillStyle = "#fca5a5"
+      ctx.beginPath()
+      ctx.arc(blankingX, 18, 4, 0, Math.PI * 2)
+      ctx.fill()
 
       // Zone A label
       ctx.fillStyle = "rgba(239,68,68,0.6)"
@@ -108,8 +131,8 @@ export function CorrelationCanvas({
       if (curve.length >= 2) {
         // Filled gradient underneath the curve
         const grad = ctx.createLinearGradient(0, 0, 0, H)
-        grad.addColorStop(0, "rgba(16,185,129,0.35)")
-        grad.addColorStop(1, "rgba(16,185,129,0.02)")
+        grad.addColorStop(0, "rgba(34,211,238,0.24)")
+        grad.addColorStop(1, "rgba(16,185,129,0.015)")
 
         ctx.beginPath()
         ctx.moveTo(0, H)
@@ -126,8 +149,10 @@ export function CorrelationCanvas({
         ctx.fill()
 
         // Curve stroke
-        ctx.strokeStyle = SONAR_COLORS.curveLine
-        ctx.lineWidth = 2
+        ctx.strokeStyle = "#67e8f9"
+        ctx.lineWidth = 1.8
+        ctx.shadowColor = "rgba(34,211,238,0.42)"
+        ctx.shadowBlur = 10
         ctx.beginPath()
         for (let i = 0; i < BINS; i++) {
           const x = i * binW + binW / 2
@@ -136,6 +161,14 @@ export function CorrelationCanvas({
           if (i === 0) ctx.moveTo(x, y)
           else ctx.lineTo(x, y)
         }
+        ctx.stroke()
+        ctx.shadowBlur = 0
+
+        ctx.strokeStyle = "rgba(52,211,153,0.65)"
+        ctx.lineWidth = 1
+        ctx.beginPath()
+        ctx.moveTo(0, H - 17)
+        ctx.lineTo(W, H - 17)
         ctx.stroke()
 
         // Peak marker: find highest point above threshold in Zone B
@@ -233,11 +266,38 @@ export function CorrelationCanvas({
     <canvas
       ref={canvasRef}
       className={className}
+      onPointerDown={(event) => {
+        const canvas = canvasRef.current
+        if (!canvas || !onBlankingChange) return
+        const rect = canvas.getBoundingClientRect()
+        const pointerX = event.clientX - rect.left
+        const handleX =
+          (blankingDistanceCm / 100 / CURVE_RANGE_M) * rect.width
+        if (Math.abs(pointerX - handleX) <= 14) {
+          draggingBlankingRef.current = true
+          canvas.setPointerCapture(event.pointerId)
+        }
+      }}
+      onPointerMove={(event) => {
+        const canvas = canvasRef.current
+        if (!canvas || !draggingBlankingRef.current || !onBlankingChange) return
+        const rect = canvas.getBoundingClientRect()
+        const distanceCm = ((event.clientX - rect.left) / rect.width) * CURVE_RANGE_M * 100
+        onBlankingChange(Math.max(0, Math.min(200, distanceCm)))
+      }}
+      onPointerUp={() => {
+        draggingBlankingRef.current = false
+      }}
+      onPointerCancel={() => {
+        draggingBlankingRef.current = false
+      }}
       style={{
         width: "100%",
         height: "100%",
         display: "block",
         imageRendering: "pixelated",
+        touchAction: "none",
+        cursor: onBlankingChange ? "ew-resize" : "default",
       }}
     />
   )

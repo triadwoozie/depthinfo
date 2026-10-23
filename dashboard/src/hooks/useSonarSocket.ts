@@ -6,23 +6,30 @@
  *    so it never triggers a React re-render (canvas draws via rAF instead).
  *  - Only low-frequency scalar values (depth, status, fps, etc.) are stored
  *    in useState so React components can subscribe to them efficiently.
- *  - Calibration updates are debounced (300 ms) before being sent to the server.
+ *  - Calibration updates are debounced briefly before being sent to the server.
  */
 
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
 
+import { API_BASE, WS_URL } from "@/lib/api"
 import {
   CalibrationState,
+  DEFAULT_OPERATOR_CONFIG,
   DEFAULT_CALIBRATION,
+  OperatorConfig,
   SonarTelemetry,
+  SystemConfig,
   WsIncomingMessage,
+  operatorPatchToSystem,
+  systemToCalibration,
+  systemToOperator,
 } from "@/types/sonar"
 
-const WS_URL = "ws://localhost:8000/ws/telemetry"
 const RECONNECT_DELAY_MS = 2000
-const CALIBRATION_DEBOUNCE_MS = 300
+const CALIBRATION_DEBOUNCE_MS = 100
+const CONFIG_DEBOUNCE_MS = 100
 
 // ---------------------------------------------------------------------------
 // Types
@@ -44,12 +51,15 @@ export interface SonarSocketState {
 
   /** Current calibration state as known by the dashboard. */
   calibration: CalibrationState
+  operatorConfig: OperatorConfig
+  configError: string | null
 
   /**
    * Send a partial calibration update to the backend.
    * Calls are automatically debounced by CALIBRATION_DEBOUNCE_MS.
    */
   updateCalibration: (patch: Partial<CalibrationState>) => void
+  updateOperatorConfig: (patch: Partial<OperatorConfig>) => void
 
   /** Round-trip latency estimate in ms (based on timestamp delta). */
   pingMs: number | null
@@ -65,6 +75,8 @@ export function useSonarSocket(): SonarSocketState {
     null
   )
   const [calibration, setCalibration] = useState<CalibrationState>(DEFAULT_CALIBRATION)
+  const [operatorConfig, setOperatorConfig] = useState<OperatorConfig>(DEFAULT_OPERATOR_CONFIG)
+  const [configError, setConfigError] = useState<string | null>(null)
   const [pingMs, setPingMs] = useState<number | null>(null)
 
   // High-frequency curve stored in a ref — never triggers renders
@@ -77,6 +89,13 @@ export function useSonarSocket(): SonarSocketState {
   // Calibration debounce
   const pendingCalibrationRef = useRef<Partial<CalibrationState>>({})
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingConfigRef = useRef<Partial<OperatorConfig>>({})
+  const configTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const configTouchedRef = useRef(false)
+
+  // Latest backend SystemConfig + the volume to restore when silent mode is switched off
+  const systemRef = useRef<SystemConfig | null>(null)
+  const lastVolumeRef = useRef(DEFAULT_OPERATOR_CONFIG.speaker_volume)
 
   // ---------------------------------------------------------------------------
   // Send calibration (debounced)
@@ -91,6 +110,17 @@ export function useSonarSocket(): SonarSocketState {
     pendingCalibrationRef.current = {}
   }, [])
 
+  const flushOperatorConfig = useCallback(() => {
+    const ws = wsRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    const patch = pendingConfigRef.current
+    if (Object.keys(patch).length === 0) return
+    const systemPatch = operatorPatchToSystem(patch, systemRef.current, lastVolumeRef.current)
+    pendingConfigRef.current = {}
+    if (Object.keys(systemPatch).length === 0) return
+    ws.send(JSON.stringify(systemPatch))
+  }, [])
+
   const updateCalibration = useCallback(
     (patch: Partial<CalibrationState>) => {
       // Merge patch into local state immediately for responsive UI
@@ -102,6 +132,54 @@ export function useSonarSocket(): SonarSocketState {
     },
     [flushCalibration]
   )
+
+  const updateOperatorConfig = useCallback(
+    (patch: Partial<OperatorConfig>) => {
+      configTouchedRef.current = true
+      setOperatorConfig((prev) => ({
+        ...prev,
+        ...patch,
+        ...(patch.rig
+          ? {
+              rig: {
+                ...prev.rig,
+                ...patch.rig,
+              },
+            }
+          : {}),
+      }))
+      pendingConfigRef.current = {
+        ...pendingConfigRef.current,
+        ...patch,
+        ...(patch.rig
+          ? {
+              rig: {
+                ...pendingConfigRef.current.rig,
+                ...patch.rig,
+              },
+            }
+          : {}),
+      }
+      if (configTimerRef.current) clearTimeout(configTimerRef.current)
+      configTimerRef.current = setTimeout(flushOperatorConfig, CONFIG_DEBOUNCE_MS)
+    },
+    [flushOperatorConfig]
+  )
+
+  /** Adopt a backend SystemConfig, keeping any edits that have not been flushed yet. */
+  const applySystemConfig = useCallback((sys: SystemConfig) => {
+    systemRef.current = sys
+    if (sys.acoustics.speaker_volume > 0) lastVolumeRef.current = sys.acoustics.speaker_volume
+    const fromServer = systemToOperator(sys, lastVolumeRef.current)
+    const pending = pendingConfigRef.current
+    setOperatorConfig({
+      ...fromServer,
+      ...pending,
+      rig: { ...fromServer.rig, ...pending.rig },
+    })
+    setCalibration({ ...systemToCalibration(sys), ...pendingCalibrationRef.current })
+    setConfigError(null)
+  }, [])
 
   // ---------------------------------------------------------------------------
   // WebSocket lifecycle
@@ -115,6 +193,8 @@ export function useSonarSocket(): SonarSocketState {
 
     ws.onopen = () => {
       setConnected(true)
+      flushCalibration()
+      flushOperatorConfig()
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current)
         reconnectTimerRef.current = null
@@ -145,6 +225,14 @@ export function useSonarSocket(): SonarSocketState {
         setCalibration(msg.calibration)
         return
       }
+      if ("type" in msg && msg.type === "config_update") {
+        applySystemConfig(msg.config)
+        return
+      }
+      if ("type" in msg && msg.type === "error") {
+        setConfigError("Backend rejected a configuration value")
+        return
+      }
 
       // Telemetry frame
       const frame = msg as SonarTelemetry
@@ -162,16 +250,44 @@ export function useSonarSocket(): SonarSocketState {
       const { correlation_curve: _curve, ...scalars } = frame
       setTelemetry(scalars)
     }
-  }, [])
+  }, [applySystemConfig, flushCalibration, flushOperatorConfig])
 
   useEffect(() => {
+    let active = true
+    fetch(`${API_BASE}/api/config`)
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Config load failed (${response.status})`)
+        }
+        return (await response.json()) as SystemConfig
+      })
+      .then((config) => {
+        if (active && !configTouchedRef.current) applySystemConfig(config)
+      })
+      .catch((error: unknown) => {
+        if (active) {
+          setConfigError(error instanceof Error ? error.message : "Config load failed")
+        }
+      })
     connect()
     return () => {
+      active = false
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current)
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
+      if (configTimerRef.current) clearTimeout(configTimerRef.current)
       wsRef.current?.close()
     }
-  }, [connect])
+  }, [applySystemConfig, connect])
 
-  return { connected, telemetry, curveRef, calibration, updateCalibration, pingMs }
+  return {
+    connected,
+    telemetry,
+    curveRef,
+    calibration,
+    operatorConfig,
+    configError,
+    updateCalibration,
+    updateOperatorConfig,
+    pingMs,
+  }
 }

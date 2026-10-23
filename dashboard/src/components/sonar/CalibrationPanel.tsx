@@ -18,7 +18,6 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { Slider } from "@/components/ui/slider"
-import { Switch } from "@/components/ui/switch"
 import { CalibrationState } from "@/types/sonar"
 
 interface CalibrationPanelProps {
@@ -89,10 +88,10 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 
 export function CalibrationPanel({ calibration: cal, onChange, className }: CalibrationPanelProps) {
   return (
-    <Card className={`bg-zinc-900 border-zinc-800 ${className ?? ""}`}>
+    <Card className={`instrument-card ${className ?? ""}`}>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-mono text-zinc-300 tracking-widest uppercase">
-          Calibration
+        <CardTitle className="instrument-title">
+          Calibration parameters
         </CardTitle>
       </CardHeader>
 
