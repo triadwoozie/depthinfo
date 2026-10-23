@@ -164,9 +164,13 @@ Set `SONAR_MOCK_MODE=false` (the default) and start `python main.py`.
 a low volume (`{"acoustics": {"speaker_volume": 0.2}}`), keep it away from ears and pets, and
 do not use headphones.
 
-1. **Pick devices.** `GET /api/devices` lists them. The defaults are `null`, meaning the
-   *system default* device. Choose explicit ids in the dashboard (*Hardware and rig*) or:
-   `-d '{"hardware": {"input_audio_device_id": 5, "output_audio_device_id": 5}}'`.
+1. **Pick devices.** `GET /api/devices` lists them. Choose input and output in the dashboard
+   (*Hardware and rig*). The backend saves their names and re-resolves current PortAudio IDs at
+   runtime, since those numeric IDs can change after reboot. Existing configs without saved names
+   use the current system-default devices. For command-line configuration, set
+   `hardware.input_audio_device_name` and `hardware.output_audio_device_name` to stable name
+   substrings (for example, `"USB Audio"`); both devices must be available through a compatible
+   PortAudio host API.
 2. **Route audio to real speakers.** The default output must be able to reproduce 16 to 20 kHz.
    A Bluetooth headset very likely cannot (see test log). Use built-in speakers or an audio interface.
 3. **Calibrate in an empty room, in order** (also available as `POST` endpoints):

@@ -22,6 +22,113 @@ except Exception:
     cv2 = None
 
 
+def audio_device_name(device_id: int | None, kind: str) -> str | None:
+    """Return the current device name only when it supports the requested direction."""
+    if sd is None or device_id is None:
+        return None
+    try:
+        device = sd.query_devices(device_id)
+        if device[f"max_{kind}_channels"] <= 0:
+            return None
+        return str(device["name"])
+    except Exception:
+        return None
+
+
+def _select_audio_device(
+    devices: list[dict[str, Any]],
+    kind: str,
+    preferred_name: str | None,
+    preferred_id: int | None,
+    default_id: int | None,
+) -> dict[str, Any]:
+    channel_key = f"max_{kind}_channels"
+    candidates = [device for device in devices if device[channel_key] > 0]
+    if preferred_name:
+        exact = [device for device in candidates if device["name"].casefold() == preferred_name.casefold()]
+        matched = exact or [
+            device for device in candidates
+            if preferred_name.casefold() in device["name"].casefold()
+        ]
+        if matched:
+            return matched[0]
+        print(
+            f"[devices] Configured {kind} name {preferred_name!r} is unavailable; "
+            "trying the system default."
+        )
+    default = next((device for device in candidates if device["id"] == default_id), None)
+    if default:
+        return default
+    if preferred_id is not None:
+        selected = next((device for device in candidates if device["id"] == preferred_id), None)
+        if selected:
+            print(f"[devices] No system-default {kind}; using legacy device ID {preferred_id}.")
+            return selected
+        print(f"[devices] Configured {kind} device ID {preferred_id} is stale.")
+    if not candidates:
+        raise RuntimeError(f"No PortAudio {kind} devices with available channels")
+    raise RuntimeError(
+        f"No system-default PortAudio {kind} device; select a device by name in the dashboard"
+    )
+
+
+def resolve_audio_device_id(hardware, kind: str) -> int:
+    """Resolve one input/output device using its stable name before its legacy ID/default."""
+    if sd is None:
+        raise RuntimeError("sounddevice / PortAudio is unavailable")
+    devices = [{"id": i, **device} for i, device in enumerate(sd.query_devices())]
+    defaults = sd.default.device
+    default_id = defaults[0 if kind == "input" else 1] if defaults else None
+    if default_id is not None and default_id < 0:
+        default_id = None
+    return _select_audio_device(
+        devices,
+        kind,
+        getattr(hardware, f"{kind}_audio_device_name"),
+        getattr(hardware, f"{kind}_audio_device_id"),
+        default_id,
+    )["id"]
+
+
+def resolve_audio_device_pair(hardware) -> tuple[int, int]:
+    """Resolve stable name hints to current IDs and ensure PortAudio can open both together."""
+    if sd is None:
+        raise RuntimeError("sounddevice / PortAudio is unavailable")
+    devices = [
+        {"id": i, **device}
+        for i, device in enumerate(sd.query_devices())
+    ]
+    defaults = sd.default.device
+    default_input = defaults[0] if defaults and defaults[0] is not None else None
+    default_output = defaults[1] if defaults and defaults[1] is not None else None
+    if default_input is not None and default_input < 0:
+        default_input = None
+    if default_output is not None and default_output < 0:
+        default_output = None
+    input_device = _select_audio_device(
+        devices, "input", hardware.input_audio_device_name,
+        hardware.input_audio_device_id, default_input,
+    )
+    output_device = _select_audio_device(
+        devices, "output", hardware.output_audio_device_name,
+        hardware.output_audio_device_id, default_output,
+    )
+    if input_device["hostapi"] != output_device["hostapi"]:
+        default_pair = (
+            next((d for d in devices if d["id"] == default_input and d["max_input_channels"] > 0), None),
+            next((d for d in devices if d["id"] == default_output and d["max_output_channels"] > 0), None),
+        )
+        if all(default_pair) and default_pair[0]["hostapi"] == default_pair[1]["hostapi"]:
+            print("[devices] Selected devices use different PortAudio APIs; using the compatible system-default pair.")
+            input_device, output_device = default_pair
+        else:
+            raise RuntimeError(
+                f"Selected input {input_device['name']!r} and output {output_device['name']!r} "
+                "belong to different PortAudio host APIs; choose a compatible device pair."
+            )
+    return input_device["id"], output_device["id"]
+
+
 def _mock_audio() -> list[dict[str, Any]]:
     return [
         {"id": 1, "name": "Mock Studio Interface (in)", "max_input_channels": 2,

@@ -54,7 +54,7 @@ from config import (  # noqa: E402
     legacy_calibration, settings,
 )
 from depth_ai import VisionPipeline  # noqa: E402
-from devices import list_devices  # noqa: E402
+from devices import audio_device_name, list_devices, resolve_audio_device_id  # noqa: E402
 from sonar_dsp import SonarDSP  # noqa: E402
 from stitcher import Stitcher  # noqa: E402
 
@@ -97,7 +97,20 @@ manager = ConnectionManager()
 
 
 def _config_message() -> str:
-    return json.dumps({"type": "config_update", "config": get_config().model_dump()})
+    return json.dumps({"type": "config_update", "config": _config_payload()})
+
+
+def _config_payload() -> dict:
+    cfg = get_config()
+    payload = cfg.model_dump()
+    for direction in ("input", "output"):
+        id_key = f"{direction}_audio_device_id"
+        try:
+            payload["hardware"][id_key] = resolve_audio_device_id(cfg.hardware, direction)
+        except RuntimeError as exc:
+            print(f"[config] Could not resolve current {direction} audio device: {exc}")
+            payload["hardware"][id_key] = None
+    return payload
 
 
 async def _telemetry_task() -> None:
@@ -177,10 +190,19 @@ async def api_devices() -> JSONResponse:
 
 @app.get("/api/config")
 async def get_config_route() -> JSONResponse:
-    return JSONResponse(get_config().model_dump())
+    return JSONResponse(_config_payload())
 
 
 async def _patch_config(partial: dict) -> JSONResponse:
+    hardware = partial.get("hardware")
+    if isinstance(hardware, dict):
+        for direction, kind in (("input", "input"), ("output", "output")):
+            id_key = f"{direction}_audio_device_id"
+            name_key = f"{direction}_audio_device_name"
+            if id_key in hardware:
+                hardware[name_key] = (
+                    audio_device_name(hardware[id_key], kind) if not settings.mock_mode else None
+                )
     try:
         cfg = config_store.patch(partial)
     except ValidationError as exc:

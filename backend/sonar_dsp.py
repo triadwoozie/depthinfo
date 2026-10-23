@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from config import AcousticsConfig, SystemConfig, get_config, settings
+import devices
 
 try:
     import sounddevice as sd  # type: ignore
@@ -296,7 +297,7 @@ class SonarDSP:
 
     def _play_record(self, cfg: SystemConfig, fs: int, tx: np.ndarray, n_samples: int) -> np.ndarray:
         """Full-duplex playback of ``tx`` (zero-padded) while recording the mic channel."""
-        in_id, out_id = cfg.hardware.input_audio_device_id, cfg.hardware.output_audio_device_id
+        in_id, out_id = devices.resolve_audio_device_pair(cfg.hardware)
         n_out = open_channels(out_id, "output", 1)
         out = np.zeros((n_samples, n_out), dtype=np.float32)
         out[: min(len(tx), n_samples), :] = tx[:n_samples, None]  # same probe on every speaker channel
@@ -307,7 +308,7 @@ class SonarDSP:
             samplerate=fs,
             channels=n_in,
             dtype="float32",
-            device=(cfg.hardware.input_audio_device_id, cfg.hardware.output_audio_device_id),
+            device=(in_id, out_id),
         )
         sd.wait()
         return rec[:, mic.channel]
@@ -358,11 +359,12 @@ class SonarDSP:
             if self.mock:
                 rec = self._rng.normal(0.0, 0.02, n)
             else:
+                in_id = devices.resolve_audio_device_id(cfg.hardware, "input")
                 mic = cfg.hardware.microphones[0]
                 raw = sd.rec(
                     n, samplerate=fs,
-                    channels=open_channels(cfg.hardware.input_audio_device_id, "input", mic.channel + 1),
-                    dtype="float32", device=cfg.hardware.input_audio_device_id,
+                    channels=open_channels(in_id, "input", mic.channel + 1),
+                    dtype="float32", device=in_id,
                 )
                 sd.wait()
                 rec = raw[:, mic.channel].astype(np.float64)
@@ -434,11 +436,12 @@ class SonarDSP:
                 time.sleep(min(seconds, 1.0))
                 rec = self._rng.normal(0.0, 0.025, int(seconds * fs))
             else:
+                in_id = devices.resolve_audio_device_id(cfg.hardware, "input")
                 mic = cfg.hardware.microphones[0]
                 rec = sd.rec(
                     int(seconds * fs), samplerate=fs,
-                    channels=open_channels(cfg.hardware.input_audio_device_id, "input", mic.channel + 1),
-                    dtype="float32", device=cfg.hardware.input_audio_device_id,
+                    channels=open_channels(in_id, "input", mic.channel + 1),
+                    dtype="float32", device=in_id,
                 )
                 sd.wait()
                 rec = rec[:, mic.channel].astype(np.float64)

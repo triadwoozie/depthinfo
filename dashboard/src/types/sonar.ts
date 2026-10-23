@@ -331,6 +331,8 @@ export interface SystemConfig {
   hardware: {
     input_audio_device_id: number | null
     output_audio_device_id: number | null
+    input_audio_device_name: string | null
+    output_audio_device_name: string | null
     camera_device_index: number
     sample_rate_hz: number
     camera_fov_deg: number
