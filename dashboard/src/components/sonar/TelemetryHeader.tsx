@@ -85,6 +85,13 @@ export function TelemetryHeader({
             value={visionFps > 0 ? `${visionFps.toFixed(0)} FPS` : "Standby"}
             active={visionFps > 0}
           />
+          {telemetry?.depth_active_provider && telemetry.depth_active_provider !== "none" && (
+            <StatusBadge
+              label="Depth"
+              value={telemetry.depth_active_provider.replace("ExecutionProvider", "")}
+              active
+            />
+          )}
           <StatusBadge label="UDP 5005" value={udpActive ? "TX" : "Idle"} active={udpActive} />
           {telemetry?.mock_mode && <Badge variant="secondary">Mock mode</Badge>}
         </div>

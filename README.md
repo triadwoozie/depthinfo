@@ -78,6 +78,32 @@ Set `SONAR_MOCK_MODE=true` (or pass `--mock` flag) to run the full pipeline with
 - Procedural 640×480 frames with animated silhouette ellipse
 - Fog Map generated from synthetic depth field
 
+Mock mode does **not** open the microphone or speaker and produces no sound. In real-hardware
+mode the sonar emits 16–20 kHz chirps; these are ultrasonic and may not be audible on ordinary
+speakers. Do not test them through headphones. See [Real hardware mode](GETTING_STARTED.md#5-real-hardware-mode)
+before enabling audio.
+
+## GPU Execution Providers
+
+Neural ONNX inference negotiates available providers in this order: CUDA, Vulkan, ROCm, DirectML,
+then CPU. The active provider and measured neural inference FPS are reported by `/healthz` and
+WebSocket telemetry; the dashboard shows the provider when neural inference is active.
+
+`backend/requirements.txt` intentionally uses the standard `onnxruntime` PyPI wheel, which
+provides the portable CPU fallback but does not include `VulkanExecutionProvider`. A Vulkan loader
+and GPU driver alone are not sufficient to enable ONNX Vulkan inference. On this AMD/Vulkan test
+machine, `vulkaninfo` detects the Radeon 680M, but `onnxruntime.get_available_providers()` reports
+only Azure and CPU. PyPI has no `onnxruntime-vulkan` distribution; Vulkan requires an ONNX Runtime
+build compiled with the Vulkan execution provider. For NVIDIA, use a CUDA-enabled ONNX Runtime
+build compatible with the installed CUDA/cuDNN libraries instead of the base package. Always
+verify with:
+
+```bash
+backend/.venv/bin/python -c "import onnxruntime as ort; print(ort.get_available_providers())"
+```
+
+If an accelerator provider is unavailable or fails to initialize, inference falls back to CPU.
+
 ---
 
 ## Calibration (4-Round Wizard)

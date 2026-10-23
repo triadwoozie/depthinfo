@@ -32,6 +32,7 @@ really running.
 from __future__ import annotations
 
 import functools
+import logging
 import math
 import os
 import threading
@@ -51,6 +52,8 @@ try:
     import onnxruntime as ort  # type: ignore
 except Exception:
     ort = None
+
+logger = logging.getLogger("sonar.depth_ai")
 
 MODEL_URL = (
     "https://huggingface.co/onnx-community/depth-anything-v2-small/resolve/main/onnx/model.onnx"
@@ -288,6 +291,79 @@ def download_model(dest: Path | None = None) -> Path:
     return dest
 
 
+def build_optimized_session(model_path: str | Path) -> "ort.InferenceSession":
+    """Build an ONNX session with the best available accelerator and a reliable CPU fallback."""
+    if ort is None:
+        raise RuntimeError("onnxruntime is not installed")
+
+    available = ort.get_available_providers()
+    logger.info("Available ONNX providers detected on system: %s", available)
+    if "CPUExecutionProvider" not in available:
+        raise RuntimeError("ONNX Runtime has no CPUExecutionProvider for fallback")
+
+    options = ort.SessionOptions()
+    options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+    options.intra_op_num_threads = max(1, min(4, (os.cpu_count() or 2) // 2))
+
+    provider_options = {
+        "CUDAExecutionProvider": {
+            "device_id": 0,
+            "arena_extend_strategy": "kNextPowerOfTwo",
+            "gpu_mem_limit": 2 * 1024 * 1024 * 1024,
+            "cudnn_conv_algo_search": "EXHAUSTIVE",
+            "do_copy_in_default_stream": True,
+        },
+        "VulkanExecutionProvider": {"device_id": 0},
+        "ROCMExecutionProvider": {"device_id": 0},
+        "DmlExecutionProvider": {"device_id": 0},
+    }
+    preference = (
+        "CUDAExecutionProvider",
+        "VulkanExecutionProvider",
+        "ROCMExecutionProvider",
+        "DmlExecutionProvider",
+    )
+    candidates = [provider for provider in preference if provider in available]
+    logger.info(
+        "Initializing ONNX session with negotiated providers: %s",
+        candidates + ["CPUExecutionProvider"],
+    )
+
+    for provider in candidates:
+        try:
+            session = ort.InferenceSession(
+                str(model_path),
+                sess_options=options,
+                providers=[provider, "CPUExecutionProvider"],
+                provider_options=[provider_options[provider], {}],
+            )
+        except Exception as exc:
+            logger.warning(
+                "Could not initialize ONNX provider %s; trying the next provider: %s",
+                provider,
+                exc,
+            )
+            continue
+
+        active = session.get_providers()
+        if provider in active:
+            logger.info("Active ONNX session initialized with providers: %s", active)
+            return session
+        logger.warning("ONNX provider %s was not activated; trying the next provider", provider)
+
+    try:
+        session = ort.InferenceSession(
+            str(model_path),
+            sess_options=options,
+            providers=["CPUExecutionProvider"],
+        )
+    except Exception as exc:
+        raise RuntimeError(f"Could not initialize an ONNX session with any available provider: {exc}") from exc
+
+    logger.info("Active ONNX session initialized with providers: %s", session.get_providers())
+    return session
+
+
 class NeuralDepthWorker:
     """Depth-Anything-V2-Small in its own thread, feeding a shared depth cache.
 
@@ -300,6 +376,9 @@ class NeuralDepthWorker:
         self.state = "idle"
         self.error: str | None = None
         self.last_ms = 0.0
+        self.active_provider = "none"
+        self._fps = 0.0
+        self._last_completed_at: float | None = None
         self._lock = threading.Lock()
         self._wake = threading.Event()
         self._pending: np.ndarray | None = None
@@ -329,9 +408,17 @@ class NeuralDepthWorker:
         with self._lock:
             return self._result
 
+    @property
+    def fps(self) -> float:
+        with self._lock:
+            if (
+                self._last_completed_at is None
+                or time.monotonic() - self._last_completed_at > 2.0
+            ):
+                return 0.0
+            return self._fps
+
     def _load(self):
-        if ort is None:
-            raise RuntimeError("onnxruntime is not installed")
         path = settings.depth_model_file
         if not path.exists():
             if not settings.depth_auto_download:
@@ -340,10 +427,7 @@ class NeuralDepthWorker:
                     "DEPTH_AUTO_DOWNLOAD=true)"
                 )
             download_model(path)
-        opts = ort.SessionOptions()
-        # Leave cores for capture, encoding and the web server instead of grabbing all of them.
-        opts.intra_op_num_threads = max(1, min(4, (os.cpu_count() or 2) // 2))
-        return ort.InferenceSession(str(path), sess_options=opts, providers=["CPUExecutionProvider"])
+        return build_optimized_session(path)
 
     @staticmethod
     def _infer(session, input_name: str, frame_bgr: np.ndarray) -> np.ndarray:
@@ -363,6 +447,8 @@ class NeuralDepthWorker:
         try:
             session = self._load()
             name = session.get_inputs()[0].name
+            active_providers = session.get_providers()
+            self.active_provider = active_providers[0] if active_providers else "none"
         except Exception as exc:
             self.error, self.state = str(exc), "error"
             log(f"WARNING: neural depth unavailable: {exc}")
@@ -384,7 +470,12 @@ class NeuralDepthWorker:
                 log(f"WARNING: {self.error}")
                 return
             self.last_ms = (time.perf_counter() - t0) * 1000.0
+            completed_at = time.monotonic()
             with self._lock:
+                if self._last_completed_at is not None:
+                    measured_fps = 1.0 / max(completed_at - self._last_completed_at, 1e-6)
+                    self._fps = measured_fps if self._fps == 0.0 else 0.2 * measured_fps + 0.8 * self._fps
+                self._last_completed_at = completed_at
                 self._result = d_rel
 
 
@@ -556,6 +647,14 @@ class VisionPipeline:
     @property
     def active_camera(self) -> int | None:
         return self.grabber.active_index
+
+    @property
+    def active_depth_provider(self) -> str:
+        return self.neural.active_provider
+
+    @property
+    def depth_fps(self) -> float:
+        return self.neural.fps
 
     # -- calibration helpers ----------------------------------------------
 

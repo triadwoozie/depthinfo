@@ -121,6 +121,8 @@ async def _telemetry_task() -> None:
                 "doa_azimuth_deg": None,
                 "depth_mode": cfg.vision_and_fog.depth_inference_mode,
                 "depth_mode_active": vision.depth_mode_active,
+                "depth_active_provider": vision.active_depth_provider,
+                "depth_model_fps": round(vision.depth_fps, 1),
                 "depth_error": vision.depth_error,
                 "camera_source": vision.camera_source,
                 "system_fps": round(1.0 / max(start - last, 1e-6), 1),
@@ -407,6 +409,7 @@ async def ws_telemetry(websocket: WebSocket) -> None:
 
 @app.get("/healthz")
 async def healthz() -> JSONResponse:
+    cfg = get_config()
     return JSONResponse({
         "ok": True,
         "mock": sonar.mock,
@@ -417,8 +420,13 @@ async def healthz() -> JSONResponse:
         "camera_mock": vision.camera_mock,
         "camera_source": vision.camera_source,  # camera | mock | mock-fallback
         "camera_error": vision.grabber.error,
-        "depth_mode": get_config().vision_and_fog.depth_inference_mode,
+        "depth_mode": cfg.vision_and_fog.depth_inference_mode,
         "depth_mode_active": vision.depth_mode_active,
+        "depth_model": {
+            "mode": cfg.vision_and_fog.depth_inference_mode,
+            "active_provider": vision.active_depth_provider,
+            "fps": round(vision.depth_fps, 1),
+        },
         "depth_error": vision.depth_error,
         "depth_ms": round(vision.depth_ms, 2),
         "vertex_count": stitcher.vertex_count,

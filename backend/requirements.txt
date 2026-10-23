@@ -6,8 +6,10 @@ pydantic-settings==2.6.1
 sounddevice==0.5.1
 scipy==1.14.1
 numpy==2.2.0
+# Standard PyPI ONNX Runtime is the portable CPU fallback; accelerator providers
+# require a matching runtime build (see README.md: GPU execution providers).
+onnxruntime==1.31.0
 opencv-python==4.10.0.84
 python-multipart==0.0.17
-onnxruntime==1.31.0
 open3d==0.20.0
 # Python 3.11 / 3.12 required: open3d and the pinned numpy/opencv wheels have no 3.13+ builds.

@@ -65,6 +65,12 @@ export interface SonarTelemetry {
   /** Depth mode actually running (differs from `depth_mode` when a fallback is active). */
   depth_mode_active?: DepthMode
 
+  /** ONNX Runtime execution provider used by neural depth inference, or "none". */
+  depth_active_provider?: string
+
+  /** Measured neural depth inference throughput in frames per second. */
+  depth_model_fps?: number
+
   /** Why the requested depth mode cannot run, if it cannot. */
   depth_error?: string | null
 
