@@ -5,3 +5,11 @@ __pycache__/
 *.pyc
 .venv/
 dist/
+
+# Runtime state & generated artefacts
+backend/config_state.json
+backend/calibration_bg_mask.npy
+backend/models/*.onnx
+backend/exports/*
+!backend/exports/.gitkeep
+dashboard/tsconfig.tsbuildinfo
