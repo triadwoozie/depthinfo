@@ -1,14 +1,13 @@
 "use client"
 
 import * as React from "react"
-import { type VariantProps } from "class-variance-authority"
-import { cn } from "cn"
-import { ToggleGroup as ToggleGroupPrimitive } from "radix-ui"
+import { cn } from "@/lib/utils"
+import * as ToggleGroupPrimitive from "@radix-ui/react-toggle-group"
 
-import { toggleVariants } from "@/registry/new-york-v4/ui/toggle"
+import { buttonVariants } from "@/components/ui/button"
 
 const ToggleGroupContext = React.createContext<
-  VariantProps<typeof toggleVariants> & {
+  Parameters<typeof buttonVariants>[0] & {
     spacing?: number
   }
 >({
@@ -25,7 +24,7 @@ function ToggleGroup({
   children,
   ...props
 }: React.ComponentProps<typeof ToggleGroupPrimitive.Root> &
-  VariantProps<typeof toggleVariants> & {
+  Parameters<typeof buttonVariants>[0] & {
     spacing?: number
   }) {
   return (
@@ -55,7 +54,7 @@ function ToggleGroupItem({
   size,
   ...props
 }: React.ComponentProps<typeof ToggleGroupPrimitive.Item> &
-  VariantProps<typeof toggleVariants>) {
+  Parameters<typeof buttonVariants>[0]) {
   const context = React.useContext(ToggleGroupContext)
 
   return (
@@ -65,7 +64,7 @@ function ToggleGroupItem({
       data-size={context.size || size}
       data-spacing={context.spacing}
       className={cn(
-        toggleVariants({
+        buttonVariants({
           variant: context.variant || variant,
           size: context.size || size,
         }),
