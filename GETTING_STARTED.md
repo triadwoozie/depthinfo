@@ -166,16 +166,28 @@ sliders.
 
 ### Blender live viewport (optional)
 
-The receiver is a Blender extension in `blender/sonar_imaging/`.
+The receiver is a Blender extension in `blender/sonar_imaging/` (version 2.0, which replaced the
+old point-instancer: it needs the backend from this repo, the stream format changed).
 
 ```bash
 blender --command extension build --source-dir blender/sonar_imaging --output-dir .
 ```
 
 In Blender: **Edit ▸ Preferences ▸ Get Extensions ▸ (menu) ▸ Install from Disk…**, pick
-`sonar_imaging_receiver-1.0.0.zip`. Then in the 3D viewport press **N**, open the
-**Sonar Imaging** tab, click **Create Sonar Cloud Mesh**, then **Start Receiver**
-(UDP `127.0.0.1:5005`). The backend must be running.
+`sonar_imaging_receiver-2.0.0.zip` (or `blender --command extension install-file -r user_default --enable <zip>`).
+Then in the 3D viewport press **N**, open the **Sonar Imaging** tab:
+
+1. **Create Displaced Mesh** builds `Sonar_Displacement_Mesh` (a 128/256/512 quad grid), the float
+   textures `Sonar_Depth_Texture` / `Sonar_Color_Texture` and the `Sonar_Displace` Geometry Nodes modifier.
+2. **Start Receiver** listens on UDP `127.0.0.1:5005`. The mesh fills with the subject; the background is
+   deleted. View it from the front (numpad 1); the subject comes toward you.
+3. Controls: *Relief Depth Scale* (or "Use backend relief" for true metric depth), *Background Cutoff*,
+   and a *Wireframe Overlay* switch (viewport only; renders do not draw it).
+
+How good the cut-out is depends on the backend's subject isolation: calibrate the empty background
+(wizard Round 3) first, and tune *Subject thickness* in the dashboard. The update path costs about
+4 ms per frame at 256x256 and 11 ms at 512x512 on the CPU (measured headless; viewport frame rate was
+not measured).
 
 ---
 

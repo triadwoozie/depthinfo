@@ -61,7 +61,7 @@ from stitcher import Stitcher  # noqa: E402
 sonar = SonarDSP()
 stitcher = Stitcher()
 vision = VisionPipeline(lambda: sonar.latest_reading, on_frame=lambda vf, cfg: stitcher.ingest(vf, cfg))
-bridge = BlenderBridge(sonar_provider=lambda: sonar.latest_reading, points_provider=stitcher.sample)
+bridge = BlenderBridge(frame_provider=lambda: vision.blender_frame)
 
 settings.exports_path.mkdir(parents=True, exist_ok=True)
 

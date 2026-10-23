@@ -287,19 +287,29 @@ Intersect DoA cones with sonar range sphere $Z_{\text{sonar}}$ to obtain directi
 | `POST` | `/api/export/blend` | Freeze + export `.blend` / `.glb` / `.ply` |
 | `GET` | `/healthz` | `{ ok, mock, ws_clients, sonar_status }` |
 
-### 4.4 Blender UDP Packet (`/blender_udp.py` → Blender @ 60 Hz, max 8192 bytes)
+### 4.4 Blender depth-frame stream (`backend/blender_udp.py` → Blender extension, UDP 5005)
 
-```json
-{
-  "state": "tracking",
-  "sonar_z": 1.45,
-  "ping_pulse": 1,
-  "audio_energy": 0.42,
-  "color_mode": "optical_rgb",
-  "points": [[0.1, 0.2, 1.45], [0.3, -0.1, 1.52]],
-  "colors": [[0.9, 0.8, 0.7], [0.5, 0.6, 0.8]]
-}
-```
+Per new vision frame the backend sends a 320x240 `uint8` nearness map (0 = background/culled, 255 =
+nearest subject surface, subject-isolation mask already applied) plus a 160x120 RGB plane. The
+extension writes both into float image datablocks and a Geometry Nodes modifier displaces a dense
+grid with them (no per-vertex Python). One frame (134 KB) exceeds the maximum UDP datagram (65,507 B),
+so it is sent as 32 KB chunks behind this 32-byte little-endian header (`<4sIBBHHHffff`):
+
+| Field | Type | Meaning |
+|---|---|---|
+| magic | 4s | `SDF1` |
+| frame_id | u32 | increments per frame; older chunks are dropped |
+| chunk / chunk_count | u8 / u8 | position of this datagram in the frame |
+| width / height | u16 / u16 | depth map size (320 x 240) |
+| color_div | u16 | 0 = no colour; n = RGB plane downscaled by n follows (2) |
+| z_sonar | f32 | physical sonar distance (m) |
+| relief | f32 | metres of displacement at depth 255 (`subject_thickness_m + relief_depth_span_m`) |
+| fov_deg | f32 | horizontal camera FOV |
+| plane_m | f32 | camera distance to the depth-0 plane (`z_sonar + subject_thickness_m`) |
+
+The reference parser is `blender/sonar_imaging/protocol.py`; `backend/tests/test_blender_udp.py`
+checks that sender and receiver agree. Displacement toward the camera = `depth/255 * relief`, so the
+mesh is metric.
 
 ---
 

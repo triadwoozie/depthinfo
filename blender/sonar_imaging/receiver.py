@@ -1,10 +1,11 @@
-"""UDP receive engine: non-blocking socket polled by a bpy.app.timers callback (AGENTS.md Rule 2).
+"""UDP receive engine: reassembles depth frames and writes them straight into image datablocks.
 
-The engine never blocks Blender's UI thread: the socket is non-blocking, the timer drains
-everything pending each tick (keeping only the newest packet) and returns 0.016 s.
+A non-blocking socket is drained by a ``bpy.app.timers`` callback every 0.016 s (AGENTS.md Rule 2).
+Only the newest complete frame is used. The frame's pixels go into ``Sonar_Depth_Texture`` and
+``Sonar_Color_Texture`` with ``foreach_set`` (no per-vertex Python); the Geometry Nodes modifier
+then displaces the grid from those images.
 """
 
-import json
 import math
 import socket
 import time
@@ -12,69 +13,50 @@ import time
 import bpy
 import numpy as np
 
-from . import geometry
+from . import nodes
+from .properties import COLOR_IMAGE, DEPTH_IMAGE, OBJECT_NAME
+from .protocol import FrameAssembler
 
 TIMER_INTERVAL = 0.016
-HOST = "127.0.0.1"  # the backend streams to localhost only
+HOST = "127.0.0.1"
 RECV_BYTES = 65535
 RECEIVING_WINDOW_S = 1.0
-FLASH_DECAY = 0.72  # per 16 ms tick: ~60 ms time constant, so 10 Hz pings read as discrete flashes
-RIPPLE_WAVELENGTH_M = 0.33
+RCVBUF = 4 * 1024 * 1024  # a frame arrives as a burst of datagrams; the kernel caps this at rmem_max
+
+# sRGB byte -> linear float (the colour image is a float buffer holding linear values)
+_c = np.arange(256, dtype=np.float32) / 255.0
+SRGB_TO_LINEAR = np.where(_c <= 0.04045, _c / 12.92, ((_c + 0.055) / 1.055) ** 2.4).astype(np.float32)
 
 
-def srgb_to_linear(c):
-    c = np.clip(c, 0.0, 1.0)
-    return np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4).astype(np.float32)
-
-
-def jet(v):
-    """Blue → cyan → green → yellow → red, v in [0,1] → (N,3) linear-ish RGB."""
-    v = np.clip(v, 0.0, 1.0)
-    r = np.clip(1.5 - np.abs(4.0 * v - 3.0), 0.0, 1.0)
-    g = np.clip(1.5 - np.abs(4.0 * v - 2.0), 0.0, 1.0)
-    b = np.clip(1.5 - np.abs(4.0 * v - 1.0), 0.0, 1.0)
-    return srgb_to_linear(np.stack([r, g, b], axis=1))
-
-
-def colorize(mode, rgb_in, depth, energy, near_rgb, far_rgb, d_near, d_far):
-    """Per-point linear RGB for the Blender-side colour override."""
-    n = len(depth)
-    if mode == "OPTICAL_RGB":  # camera colours exactly as the backend sent them
-        if rgb_in is not None and len(rgb_in) == n:
-            return srgb_to_linear(rgb_in)
-        return np.full((n, 3), 0.8, np.float32)
-    t = np.clip((depth - d_near) / max(d_far - d_near, 1e-6), 0.0, 1.0)[:, None]
-    if mode == "FOG_MIST":  # bright near, fading into a cool dark mist
-        near_c, far_c = np.array([0.80, 0.92, 1.00]), np.array([0.01, 0.02, 0.04])
-        return (far_c + (near_c - far_c) * (1.0 - t) ** 1.5).astype(np.float32)
-    if mode == "ACOUSTIC_HEATMAP":  # echo strength, modulated by proximity for relief
-        val = max(0.0, min(1.0, energy)) * (0.4 + 0.6 * (1.0 - t[:, 0]))
-        return jet(val)
-    near_c, far_c = np.array(near_rgb), np.array(far_rgb)  # CUSTOM_PALETTE
-    return (near_c + (far_c - near_c) * t).astype(np.float32)
+def _set_image(img, w, h, rgb_hw3):
+    """Write an (h, w, 3) float array into ``img`` (alpha 1), resizing the datablock if needed."""
+    if tuple(img.size) != (w, h):
+        img.scale(w, h)
+    rgba = np.ones((h, w, 4), np.float32)
+    rgba[..., :3] = rgb_hw3
+    img.pixels.foreach_set(np.ascontiguousarray(rgba[::-1]).ravel())  # Blender rows run bottom-up
+    img.update()
 
 
 class Receiver:
     def __init__(self):
         self.sock = None
         self.port = 0
+        self.assembler = FrameAssembler()
         self._reset()
 
     def _reset(self):
-        self.base = np.zeros((0, 3), np.float32)       # Blender-frame positions
-        self.rgb = np.zeros((0, 3), np.float32)        # colours after override (linear)
-        self.state = "-"
-        self.sonar_z = 0.0
-        self.energy = 0.0
-        self.flash = 0.0
-        self.last_packet = 0.0
-        self.packets_total = 0
-        self.pps = 0.0
+        self.assembler = FrameAssembler()
+        self.info = None            # last frame: dict of width/height/z_sonar/relief/fov/plane
+        self.frames_total = 0
+        self.fps = 0.0
+        self.last_frame = 0.0
+        self.last_apply_ms = 0.0
+        self.subject_px = 0
         self._win_start = time.monotonic()
         self._win_count = 0
         self._last_redraw = 0.0
-        self._dirty = False
-        self._last_scale = 1.0
+        self._applied = {}
         self._error_shown = False
 
     # -- lifecycle ---------------------------------------------------------
@@ -85,7 +67,7 @@ class Receiver:
 
     @property
     def receiving(self):
-        return self.running and (time.monotonic() - self.last_packet) < RECEIVING_WINDOW_S
+        return self.running and (time.monotonic() - self.last_frame) < RECEIVING_WINDOW_S
 
     def start(self, port):
         """Bind a non-blocking UDP socket and register the timer. Raises OSError on bind failure."""
@@ -94,6 +76,10 @@ class Receiver:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, RCVBUF)
+            except OSError:
+                pass
             sock.bind((HOST, port))
             sock.setblocking(False)
         except OSError:
@@ -105,7 +91,7 @@ class Receiver:
             bpy.app.timers.register(_timer, first_interval=0.0)
 
     def stop(self):
-        """Unregister the timer, close the socket and free all buffers."""
+        """Unregister the timer, close the socket and free the frame buffers."""
         if bpy.app.timers.is_registered(_timer):
             bpy.app.timers.unregister(_timer)
         if self.sock is not None:
@@ -117,7 +103,7 @@ class Receiver:
         self._reset()
         self._tag_redraw()
 
-    # -- timer tick --------------------------------------------------------
+    # -- timer -------------------------------------------------------------
 
     def tick(self):
         """One timer step. Returns the next interval, or None to unregister."""
@@ -133,110 +119,73 @@ class Receiver:
 
     def _step(self):
         settings = getattr(bpy.context.scene, "sonar_imaging", None)
-        if settings is None:
-            return
-        latest, ping, count = self._drain()
+        frame = None
+        while True:  # drain everything; keep the newest complete frame
+            try:
+                data, _ = self.sock.recvfrom(RECV_BYTES)
+            except (BlockingIOError, InterruptedError, OSError):
+                break
+            got = self.assembler.feed(data)
+            if got is not None:
+                frame = got
         now = time.monotonic()
-        if count:
-            self.last_packet = now
-            self._win_count += count
+        if frame is not None and settings is not None:
+            t0 = time.perf_counter()
+            self._apply_frame(frame, settings)
+            self.last_apply_ms = (time.perf_counter() - t0) * 1000.0
+            self.last_frame = now
+            self.frames_total += 1
+            self._win_count += 1
         if now - self._win_start >= 1.0:
-            self.pps = self._win_count / (now - self._win_start)
+            self.fps = self._win_count / (now - self._win_start)
             self._win_start, self._win_count = now, 0
-        if latest is not None:
-            self._ingest(latest, settings)
-        if ping and settings.flash_on_ping:
-            self.flash = 1.0
-        self._apply(settings, now, ping)
         if now - self._last_redraw > 0.25:
             self._tag_redraw()
             self._last_redraw = now
 
-    def _drain(self):
-        """Read every pending datagram; keep the newest valid packet and remember any ping."""
-        latest, ping, count = None, False, 0
-        while True:
-            try:
-                data, _ = self.sock.recvfrom(RECV_BYTES)
-            except (BlockingIOError, InterruptedError):
-                break
-            except OSError:
-                break
-            count += 1
-            try:
-                pkt = json.loads(data)
-            except (ValueError, UnicodeDecodeError):
-                continue
-            if isinstance(pkt, dict):
-                ping = ping or bool(pkt.get("ping_pulse"))
-                latest = pkt
-        return latest, ping, count
-
-    def _ingest(self, pkt, s):
-        self.state = str(pkt.get("state", "-"))
-        self.sonar_z = float(pkt.get("sonar_z", 0.0))
-        self.energy = float(pkt.get("audio_energy", 0.0))
-        pts = np.asarray(pkt.get("points") or [], dtype=np.float32).reshape(-1, 3)
-        # Backend frame (x right, y up, z forward) → Blender (x right, y forward, z up).
-        self.base = np.ascontiguousarray(pts[:, [0, 2, 1]])
-        cols = pkt.get("colors")
-        rgb_in = np.asarray(cols, dtype=np.float32).reshape(-1, 3) if cols else None
-        self.rgb = colorize(
-            s.color_mode, rgb_in, self.base[:, 1], self.energy,
-            tuple(s.near_color[:3]), tuple(s.far_color[:3]), s.depth_near, s.depth_far,
-        ) if len(self.base) else np.zeros((0, 3), np.float32)
-        self._dirty = True
-
     # -- scene updates -----------------------------------------------------
 
-    def _apply(self, s, now, ping):
-        self._drive_helpers(ping)
-        obj = geometry.find_cloud(s)
-        if obj is None or obj.type != "MESH" or obj.mode == "EDIT" or len(self.base) == 0:
-            self.flash *= FLASH_DECAY
+    def _apply_frame(self, frame, settings):
+        self.info = dict(width=frame.width, height=frame.height, z_sonar=frame.z_sonar,
+                         relief=frame.relief, fov=frame.fov_deg, plane=frame.plane_m)
+        self.subject_px = int(np.count_nonzero(frame.depth))
+        depth_img = bpy.data.images.get(DEPTH_IMAGE)
+        color_img = bpy.data.images.get(COLOR_IMAGE)
+        obj = bpy.data.objects.get(OBJECT_NAME)
+        if depth_img is None or color_img is None or obj is None:
+            return  # nothing to drive yet (Create / Reset Displaced Mesh not clicked)
+        near = frame.depth.astype(np.float32) / 255.0
+        _set_image(depth_img, frame.width, frame.height, near[..., None])
+        if frame.rgb is not None:
+            ch, cw = frame.rgb.shape[:2]
+            _set_image(color_img, cw, ch, SRGB_TO_LINEAR[frame.rgb])
+        self.apply_params(settings, obj)
+
+    def apply_params(self, settings, obj=None):
+        """Push relief / cutoff / frustum parameters to the modifier (only values that changed)."""
+        obj = obj or bpy.data.objects.get(OBJECT_NAME)
+        if obj is None:
             return
-        rippling = s.wave_amplitude > 0.0
-        if not (self._dirty or rippling or self.flash > 0.01):
+        mod = obj.modifiers.get("Sonar_Displace")
+        if mod is None or mod.node_group is None:
             return
-        co = self.base.copy()
-        if rippling:
-            centre = self.base.mean(axis=0)
-            r = np.hypot(co[:, 0] - centre[0], co[:, 1] - centre[1])
-            phase = 2.0 * math.pi * (r / RIPPLE_WAVELENGTH_M - s.wave_speed * now)
-            co[:, 2] += s.wave_amplitude * np.sin(phase)
-        rgb = self.rgb
-        if self.flash > 0.01:
-            rgb = rgb + (1.0 - rgb) * (0.8 * self.flash)
-        rgba = np.ones((len(co), 4), np.float32)
-        rgba[:, :3] = rgb
-        self._write_mesh(obj.data, co, rgba)
-
-        scale = 1.0 + 0.6 * self.flash
-        if self._dirty or abs(scale - self._last_scale) > 1e-3:
-            geometry.set_point_radius(obj, s.point_size_mm / 1000.0 * scale)
-            self._last_scale = scale
-        self.flash = self.flash * FLASH_DECAY if self.flash > 0.01 else 0.0
-        self._dirty = False
-
-    @staticmethod
-    def _write_mesh(mesh, co, rgba):
-        n = len(co)
-        if len(mesh.vertices) != n:
-            mesh.clear_geometry()
-            mesh.vertices.add(n)
-        col = geometry.ensure_col_attribute(mesh)
-        mesh.vertices.foreach_set("co", co.ravel())
-        col.data.foreach_set("color", rgba.ravel())
-        mesh.update()
-
-    def _drive_helpers(self, ping):
-        """Optional template objects: SonarTarget follows the depth, SonarPing pulses."""
-        target = bpy.data.objects.get("SonarTarget")
-        if target is not None:
-            target.location.y = self.sonar_z  # Blender forward axis
-        ring = bpy.data.objects.get("SonarPing")
-        if ring is not None and ping:
-            ring.scale = (max(self.sonar_z, 0.05),) * 3
+        info = self.info
+        relief = info["relief"] if (info and settings.auto_relief) else settings.relief_scale
+        plane = info["plane"] if info else 1.7
+        fov = info["fov"] if info else 65.0
+        aspect = (info["height"] / info["width"]) if info else 0.75
+        values = {
+            "Relief": relief,
+            "Cutoff": settings.cutoff,
+            "Plane Distance": plane,
+            "Half Width": plane * math.tan(math.radians(fov) / 2.0),
+            "Aspect": aspect,
+        }
+        for name, value in values.items():
+            if self._applied.get(name) != value:
+                nodes.set_modifier_input(mod, name, value)
+                self._applied[name] = value
+        obj.update_tag()
 
     @staticmethod
     def _tag_redraw():

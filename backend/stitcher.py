@@ -24,7 +24,7 @@ import open3d as o3d
 from scipy.spatial import cKDTree
 
 from config import BlenderStyleConfig, SystemConfig
-from depth_ai import VisionFrame, _hex_bgr
+from depth_ai import VisionFrame, _hex_bgr, subject_mask  # noqa: F401  (re-exported for callers/tests)
 
 STRIDE = 4            # pixel subsampling before unprojection (640x480 → 160x120)
 MIN_INTERVAL_S = 0.1  # stitch at most 10 Hz
@@ -65,28 +65,6 @@ def route_colors(
         return heat.reshape(-1, 3)[:, ::-1].astype(np.float32) / 255.0
     t = t[:, None].astype(np.float32)
     return (near + (far - near) * t).astype(np.float32)
-
-
-def subject_mask(
-    z: np.ndarray,
-    fog01: np.ndarray,
-    z_sonar: float,
-    max_scan_m: float,
-    fog_threshold: float,
-    thickness_m: float,
-) -> np.ndarray:
-    """Which points belong to the subject (everything else is background and is discarded).
-
-    A point is kept only if it has a finite depth, is bright enough in the fog map
-    (``fog > fog_threshold``), lies within the scan range (``Z <= max_scan_m``) and is no more than
-    ``thickness_m`` behind the sonar anchor, which strips the wall and floating room dust.
-    """
-    return (
-        np.isfinite(z)
-        & (fog01 > fog_threshold)
-        & (z <= max_scan_m)
-        & (z - z_sonar <= thickness_m)
-    )
 
 
 class Stitcher:

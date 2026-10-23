@@ -544,6 +544,76 @@ def hybrid_metric_depth(
 
 
 # ---------------------------------------------------------------------------
+# Subject isolation and the Blender depth frame
+# ---------------------------------------------------------------------------
+
+def subject_mask(
+    z: np.ndarray,
+    fog01: np.ndarray,
+    z_sonar: float,
+    max_scan_m: float,
+    fog_threshold: float,
+    thickness_m: float,
+) -> np.ndarray:
+    """Which points belong to the subject (everything else is background and is discarded).
+
+    A point is kept only if it has a finite depth, is bright enough in the fog map
+    (``fog > fog_threshold``), lies within the scan range (``Z <= max_scan_m``) and is no more than
+    ``thickness_m`` behind the sonar anchor, which strips the wall and floating room dust.
+    """
+    return (
+        np.isfinite(z)
+        & (fog01 > fog_threshold)
+        & (z <= max_scan_m)
+        & (z - z_sonar <= thickness_m)
+    )
+
+
+BLENDER_W, BLENDER_H = 320, 240
+
+
+@dataclass
+class BlenderFrame:
+    """What the Blender displaced-mesh receiver gets: a normalised depth map and the camera colours.
+
+    ``depth`` is uint8 *nearness*: 0 = background / culled, 255 = nearest subject surface. Together
+    with ``relief_m`` it is metric: displacement toward the camera = depth/255 * relief_m, measured
+    from the plane ``plane_m`` in front of the camera (``Z_sonar + subject_thickness_m``).
+    """
+    frame_id: int
+    depth: np.ndarray   # (BLENDER_H, BLENDER_W) uint8
+    rgb: np.ndarray     # (BLENDER_H // 2, BLENDER_W // 2, 3) uint8: colour needs less resolution than depth
+    z_sonar: float
+    relief_m: float
+    fov_deg: float
+    plane_m: float
+
+
+def make_blender_frame(
+    frame_bgr: np.ndarray,
+    z: np.ndarray,
+    i_fog: np.ndarray,
+    z_sonar: float,
+    cfg: SystemConfig,
+    frame_id: int,
+) -> BlenderFrame:
+    """Downsample the subject-isolated metric depth ``z`` to a 320x240 nearness map for Blender."""
+    v = cfg.vision_and_fog
+    keep = subject_mask(z, i_fog / 255.0, z_sonar, v.max_scan_distance_m, v.fog_discard_threshold,
+                        v.subject_thickness_m)
+    plane = z_sonar + v.subject_thickness_m
+    relief = v.subject_thickness_m + v.relief_depth_span_m
+    near = np.where(keep, np.clip((plane - np.where(keep, z, plane)) / relief, 0.0, 1.0), 0.0).astype(np.float32)
+    size = (BLENDER_W, BLENDER_H)
+    small = cv2.resize(near, size, interpolation=cv2.INTER_AREA)
+    keep_small = cv2.resize(keep.astype(np.uint8), size, interpolation=cv2.INTER_NEAREST).astype(bool)
+    depth = np.where(keep_small, np.maximum(np.rint(small * 255.0), 1.0), 0.0).astype(np.uint8)
+    rgb = cv2.cvtColor(cv2.resize(frame_bgr, (BLENDER_W // 2, BLENDER_H // 2), interpolation=cv2.INTER_AREA),
+                       cv2.COLOR_BGR2RGB)
+    return BlenderFrame(frame_id, depth, rgb, float(z_sonar), float(relief), 0.0, float(plane))
+
+
+# ---------------------------------------------------------------------------
 # Fog Map
 # ---------------------------------------------------------------------------
 
@@ -628,6 +698,8 @@ class VisionPipeline:
         self.depth_error: str | None = None
         self.depth_ms = 0.0
         self.error: str | None = None
+        self.blender_frame: BlenderFrame | None = None  # newest frame for the Blender bridge
+        self._blender_seq = 0
         self._load_background()
 
     def _load_background(self) -> None:
@@ -791,6 +863,11 @@ class VisionPipeline:
         i_fog = fog_intensity(z, vf.min_scan_distance_m, vf.max_scan_distance_m,
                               vf.fog_falloff_curve, vf.fog_density)
         z_clipped = np.where(i_fog > 0, z, np.nan).astype(np.float32)
+
+        self._blender_seq += 1
+        bf = make_blender_frame(frame, z, i_fog, z_sonar, cfg, self._blender_seq)
+        bf.fov_deg = float(cfg.hardware.camera_fov_deg)
+        self.blender_frame = bf
 
         fog_img = colorize_fog(i_fog, cfg)
         rgb_img = frame.copy()

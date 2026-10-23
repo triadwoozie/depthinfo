@@ -218,7 +218,7 @@ curl -X PATCH http://localhost:8000/api/config \
 **Files to Build:**
 - `backend/blender_udp.py`
 - `backend/blender_exporter.py`
-- `blender/sonar_imaging/` *(Blender extension: manifest, receiver, N-panel)*
+- `blender/sonar_imaging/` *(Blender extension: manifest, protocol, displaced-mesh nodes, receiver, N-panel)*
 - `blender/export_static_scene.py`
 - `blender/template_exhibition.blend`
 
