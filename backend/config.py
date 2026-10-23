@@ -45,6 +45,11 @@ class SonarSettings(BaseSettings):
         default="models/depth_anything_v2_vits.onnx", alias="DEPTH_MODEL_PATH"
     )
     depth_auto_download: bool = Field(default=False, alias="DEPTH_AUTO_DOWNLOAD")
+    real_camera: bool = Field(
+        default=False,
+        alias="SONAR_REAL_CAMERA",
+        description="Use the physical camera even when SONAR_MOCK_MODE=true (mock sonar, real video).",
+    )
     exports_dir: str = Field(default="exports", alias="EXPORTS_DIR")
     blender_bin: str | None = Field(default=None, alias="BLENDER_BIN")
 
@@ -133,6 +138,7 @@ class CalibrationConfig(_Model):
 
 FalloffCurve = Literal["linear", "exponential", "squared"]
 FogColormap = Literal["mist_grayscale", "thermal", "viridis", "custom_hex"]
+DepthMode = Literal["disabled", "lightweight_fast", "neural_onnx"]
 
 
 class VisionAndFogConfig(_Model):
@@ -142,6 +148,10 @@ class VisionAndFogConfig(_Model):
     fog_density: float = Field(default=1.2, ge=0.0, le=10.0)
     fog_colormap: FogColormap = "mist_grayscale"
     relief_depth_span_m: float = Field(default=0.45, ge=0.0, le=5.0)
+    # disabled: flat plane at Z_sonar | lightweight_fast: CPU heuristic | neural_onnx: Depth-Anything-V2
+    depth_inference_mode: DepthMode = "lightweight_fast"
+    # Half-angle of the acoustic beam cone whose median relative depth anchors the relief to Z_sonar.
+    acoustic_beam_deg: float = Field(default=20.0, ge=2.0, le=60.0)
     temporal_stitch_frames: int = Field(default=5, ge=1, le=60)
     voxel_downsample_m: float = Field(default=0.01, ge=0.001, le=0.5)
 

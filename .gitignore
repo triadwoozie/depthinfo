@@ -14,3 +14,7 @@ backend/models/*.onnx
 backend/exports/*
 !backend/exports/.gitkeep
 dashboard/tsconfig.tsbuildinfo
+
+# Run scripts
+logs/
+.pytest_cache/

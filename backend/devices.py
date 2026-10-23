@@ -60,7 +60,7 @@ def enumerate_audio() -> tuple[list[dict[str, Any]], bool]:
 
 def enumerate_cameras(max_index: int = 10) -> tuple[list[dict[str, Any]], bool]:
     """Probe camera indices ``0..max_index-1``. Returns ``(cameras, is_mock)``."""
-    if settings.mock_mode or cv2 is None:
+    if (settings.mock_mode and not settings.real_camera) or cv2 is None:
         return _mock_cameras(), True
     found: list[dict[str, Any]] = []
     try:

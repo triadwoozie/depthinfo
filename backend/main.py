@@ -119,6 +119,10 @@ async def _telemetry_task() -> None:
                 "fps_sonar_hz": cfg.acoustics.ping_rate_hz,
                 "active_vertex_count": stitcher.vertex_count,
                 "doa_azimuth_deg": None,
+                "depth_mode": cfg.vision_and_fog.depth_inference_mode,
+                "depth_mode_active": vision.depth_mode_active,
+                "depth_error": vision.depth_error,
+                "camera_source": vision.camera_source,
                 "system_fps": round(1.0 / max(start - last, 1e-6), 1),
                 "ping_rate_hz": round(settings.ws_hz, 1),  # legacy dashboard field
                 "correlation_curve": r.correlation_curve,
@@ -216,6 +220,15 @@ def _mark_round(n: int) -> dict:
     return {"calibration_round_completed": max(get_config().calibration.calibration_round_completed, n)}
 
 
+@app.get("/api/calibration/input-level")
+async def input_level() -> JSONResponse:
+    """Short silent recording from the microphone: level, peak and a quality verdict."""
+    try:
+        return JSONResponse(await asyncio.get_running_loop().run_in_executor(None, sonar.measure_input_level))
+    except Exception as exc:
+        return JSONResponse(status_code=503, content={"status": "error", "detail": str(exc)})
+
+
 @app.post("/api/calibration/round/{n}")
 async def calibration_round(n: int, request: Request) -> JSONResponse:
     loop = asyncio.get_running_loop()
@@ -235,7 +248,7 @@ async def calibration_round(n: int, request: Request) -> JSONResponse:
         if n == 3:
             bg = await loop.run_in_executor(None, vision.capture_background)
             await _patch_config({"calibration": {"background_fog_captured": True, **_mark_round(3)}})
-            return JSONResponse({"status": "ok", "frames": 30, "bg_shape": list(bg.shape)})
+            return JSONResponse({"status": "ok", "quality": "ok", "frames": 30, "bg_shape": list(bg.shape)})
         return await _round_4(request)
     except HTTPException:
         raise
@@ -257,7 +270,7 @@ async def _round_4(request: Request) -> JSONResponse:
     if sonar.mock:  # no physical target in mock mode: synthesise a clean 3-point sweep
         _round4_samples[:] = [
             {"distance_m": d, "z_raw": d + float(np.random.default_rng(int(d * 10)).normal(0, 0.005)),
-             "d_raw": 1.0 - d / 3.0}
+             "d_rel": d / 3.0}
             for d in _ROUND4_TARGETS_M
         ]
     else:
@@ -267,9 +280,9 @@ async def _round_4(request: Request) -> JSONResponse:
         await asyncio.sleep(1.0)  # let the EMA settle on the placed target
         z_cal = sonar.latest_reading.sonar_depth_m
         z_raw = (z_cal - cfg.metric_offset_m) / cfg.metric_scale_factor  # undo current α/β
-        d_raw = await loop.run_in_executor(None, vision.sample_foreground_d_raw)
+        d_rel = await loop.run_in_executor(None, vision.sample_anchor_d_rel)
         _round4_samples[:] = [s for s in _round4_samples if s["distance_m"] != d]
-        _round4_samples.append({"distance_m": d, "z_raw": z_raw, "d_raw": d_raw})
+        _round4_samples.append({"distance_m": d, "z_raw": z_raw, "d_rel": d_rel})
 
     captured = sorted(s["distance_m"] for s in _round4_samples)
     if len(captured) < len(_ROUND4_TARGETS_M):
@@ -285,7 +298,8 @@ async def _round_4(request: Request) -> JSONResponse:
     await _patch_config({"calibration": {
         "metric_scale_factor": float(np.clip(alpha, 0.1, 5.0)),
         "metric_offset_m": float(np.clip(beta, -2.0, 2.0)), **_mark_round(4)}})
-    return JSONResponse({"status": "ok", "metric_scale_factor": alpha, "metric_offset_m": beta,
+    return JSONResponse({"status": "ok", "quality": "ok" if rms < 0.10 else "poor",
+                         "metric_scale_factor": alpha, "metric_offset_m": beta,
                          "fit_rms_m": rms, "samples": samples})
 
 
@@ -326,8 +340,9 @@ async def stream_fog() -> StreamingResponse:
 # ---------------------------------------------------------------------------
 
 @app.get("/api/pointcloud")
-async def pointcloud(max_points: int = 4000) -> JSONResponse:
-    points, colors = stitcher.sample(min(max(max_points, 1), 20000))
+async def pointcloud(max_points: int = 4000, stitched: bool = False) -> JSONResponse:
+    """Newest single-frame cloud (true relief) or, with ``stitched=true``, the fused cloud."""
+    points, colors = stitcher.sample(min(max(max_points, 1), 20000), stitched=stitched)
     return JSONResponse({"count": len(points), "total": stitcher.vertex_count,
                          "points": points, "colors": colors})
 
@@ -399,8 +414,13 @@ async def healthz() -> JSONResponse:
         "sonar_status": sonar.latest_reading.status,
         "sonar_error": sonar.last_error,  # last audio I/O failure, cleared on the next good ping
         "vision_fps": round(vision.fps, 1),
-        "depth_backend": vision.depth_backend,
         "camera_mock": vision.camera_mock,
+        "camera_source": vision.camera_source,  # camera | mock | mock-fallback
+        "camera_error": vision.grabber.error,
+        "depth_mode": get_config().vision_and_fog.depth_inference_mode,
+        "depth_mode_active": vision.depth_mode_active,
+        "depth_error": vision.depth_error,
+        "depth_ms": round(vision.depth_ms, 2),
         "vertex_count": stitcher.vertex_count,
         "blender": find_blender(),
         "udp_sent": bridge.sent_count,
@@ -408,4 +428,6 @@ async def healthz() -> JSONResponse:
 
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False, log_level="info")
+    # timeout_graceful_shutdown: open MJPEG/WebSocket clients must not keep the process alive on Ctrl+C.
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False, log_level="info",
+                timeout_graceful_shutdown=2)

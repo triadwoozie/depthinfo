@@ -6,6 +6,36 @@ Each phase is self-contained and includes strict acceptance criteria. Agents mus
 
 ---
 
+## Status and what's next
+
+**Done:** Phases 1, 2, 3 and 5 (backend, DSP, fog map, stitcher, headless export, Blender
+extension). Phase 4 is largely done: stock shadcn dashboard, live streams, depth-mode selector,
+the guided 4-round calibration wizard and export. The hybrid sonar + vision depth model, true
+per-pixel unprojection, the camera grabber thread with real fallback, `run.py`/`run.sh` and 16
+backend unit tests are in.
+
+**Next, in priority order:**
+
+1. **Validate a real echo.** The sonar has never run end to end on proper audio hardware (the
+   test machine's output was a Bluetooth headset). Route a speaker that reaches 16 to 20 kHz and a
+   microphone, run the wizard, and confirm `quality: good` and a stable depth on a real target.
+2. **CI.** GitHub Actions running pytest, `npm run type-check`, `npm run build` and
+   `blender --command extension validate` in mock mode.
+3. **Phase 4 leftovers.** Draggable rig editor with an XYZ panel and FOV arcs; mesh-reconstruction
+   (point cloud, Poisson, ball-pivoting) and fog-colormap controls; a visible WebSocket latency badge.
+4. **Phase 6.** Multi-mic GCC-PHAT and `MultiMicLab`; dashboard `AUTOPILOT` badge and optional
+   snapshot replay.
+5. **Better hybrid depth.** Per-region sonar anchoring instead of one cone median, a confidence
+   term, temporal smoothing of `D_rel`, GPU execution providers or a smaller input size for the
+   neural model.
+6. **Access and security.** Configurable CORS and API address for LAN use, authentication,
+   HTTPS.
+7. **Portability.** Windows support for the run scripts, a Docker image for the backend.
+8. **Persist calibration state in the UI** (which rounds are done, with timestamps) and show
+   Round 4's live depth while capturing each target.
+
+---
+
 ## Phase 1: Schemas, Hardware Device Enumerator & Mock Telemetry Spine
 
 **Assigned To:** Backend / Full-Stack Agent

@@ -9,20 +9,50 @@ import { Slider } from "@/components/ui/slider"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { API_BASE } from "@/lib/api"
-import { FogFalloff, OperatorConfig } from "@/types/sonar"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { DepthMode, FogFalloff, OperatorConfig, SonarTelemetry } from "@/types/sonar"
 
 const RGB_URL = `${API_BASE}/api/stream/rgb`
 const FOG_URL = `${API_BASE}/api/stream/fog`
 const CLOUD_URL = `${API_BASE}/api/pointcloud?max_points=4000`
 const CLOUD_POLL_MS = 250
 
+const DEPTH_MODES: { value: DepthMode; title: string; description: string }[] = [
+  {
+    value: "disabled",
+    title: "Disabled / Direct sonar",
+    description: "Flat plane at the sonar distance. No depth compute.",
+  },
+  {
+    value: "lightweight_fast",
+    title: "Fast heuristic",
+    description: "CPU edge, brightness and background cues, about 1 ms.",
+  },
+  {
+    value: "neural_onnx",
+    title: "Neural ONNX",
+    description: "Depth-Anything-V2-Small in a background thread (slower, true relief).",
+  },
+]
+
 interface VisionPreviewProps {
+  telemetry?: Omit<SonarTelemetry, "correlation_curve"> | null
   config: OperatorConfig
   onConfigChange: (patch: Partial<OperatorConfig>) => void
 }
 
-function VisionPreviewView({ config, onConfigChange }: VisionPreviewProps) {
+function VisionPreviewView({ telemetry, config, onConfigChange }: VisionPreviewProps) {
   const range = [config.scan_min_m, config.scan_max_m]
+  const selectedMode = DEPTH_MODES.find((mode) => mode.value === config.depth_inference_mode)
+  const active = telemetry?.depth_mode_active
+  const cameraSource = telemetry?.camera_source
 
   return (
     <Card>
@@ -75,6 +105,54 @@ function VisionPreviewView({ config, onConfigChange }: VisionPreviewProps) {
             </TabsContent>
           </div>
         </Tabs>
+
+        <div className="grid gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Label className="text-sm">Depth inference mode</Label>
+            <div className="flex flex-wrap items-center gap-2">
+              {cameraSource && (
+                <Badge
+                  variant={cameraSource === "mock-fallback" ? "destructive" : "outline"}
+                  className="font-normal"
+                >
+                  {cameraSource === "camera"
+                    ? "Live camera"
+                    : cameraSource === "mock"
+                      ? "Synthetic video"
+                      : "Camera unavailable: synthetic video"}
+                </Badge>
+              )}
+              {active && (
+                <Badge variant="secondary" className="font-normal">
+                  Running: {DEPTH_MODES.find((mode) => mode.value === active)?.title ?? active}
+                </Badge>
+              )}
+            </div>
+          </div>
+          <Select
+            value={config.depth_inference_mode}
+            onValueChange={(depth_inference_mode) =>
+              onConfigChange({ depth_inference_mode: depth_inference_mode as DepthMode })
+            }
+          >
+            <SelectTrigger className="w-full" aria-label="Depth inference mode">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {DEPTH_MODES.map((mode) => (
+                <SelectItem key={mode.value} value={mode.value}>
+                  {mode.title}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">{selectedMode?.description}</p>
+          {telemetry?.depth_error && (
+            <Alert>
+              <AlertDescription>{telemetry.depth_error}</AlertDescription>
+            </Alert>
+          )}
+        </div>
 
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
