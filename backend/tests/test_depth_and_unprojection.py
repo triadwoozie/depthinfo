@@ -13,6 +13,13 @@ from stitcher import Stitcher, camera_rotation
 H, W = 480, 640
 
 
+def geometry_cfg():
+    """Default config with subject isolation relaxed: these tests check pinhole maths, not culling."""
+    cfg = SystemConfig()
+    cfg.vision_and_fog.subject_thickness_m = 2.0
+    return cfg
+
+
 def make_frame(z_metric, bgr=None):
     bgr = np.full((H, W, 3), 120, np.uint8) if bgr is None else bgr
     return depth_ai.VisionFrame(
@@ -26,7 +33,7 @@ def make_frame(z_metric, bgr=None):
 # ---------------------------------------------------------------------------
 
 def test_unprojection_matches_pinhole_equations():
-    cfg = SystemConfig()
+    cfg = geometry_cfg()
     fov_x = math.radians(cfg.hardware.camera_fov_deg)
     fov_y = 2 * math.atan(math.tan(fov_x / 2) * H / W)
     fx = (W / 2) / math.tan(fov_x / 2)
@@ -44,7 +51,7 @@ def test_unprojection_matches_pinhole_equations():
 
 
 def test_every_point_keeps_its_own_depth():
-    cfg = SystemConfig()
+    cfg = geometry_cfg()
     z = np.full((H, W), np.nan, np.float32)
     z[::4, ::4] = np.linspace(1.0, 2.0, (H // 4) * (W // 4), dtype=np.float32).reshape(H // 4, W // 4)
     pts, _ = Stitcher()._unproject(make_frame(z), cfg)
@@ -58,7 +65,7 @@ def test_camera_pose_rotation_and_translation():
     fwd = np.array([0.0, 0.0, 1.0])
     assert camera_rotation(Pose(yaw_deg=90)) @ fwd == pytest.approx([1, 0, 0], abs=1e-9)    # turn right
     assert camera_rotation(Pose(pitch_deg=90)) @ fwd == pytest.approx([0, 1, 0], abs=1e-9)  # look up
-    cfg = SystemConfig()
+    cfg = geometry_cfg()
     cfg.hardware.camera_pose = Pose(x_cm=100.0, y_cm=50.0, z_cm=-20.0)
     z = np.full((H, W), np.nan, np.float32)
     z[240, 320] = 2.0  # optical axis

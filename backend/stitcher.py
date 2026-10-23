@@ -67,6 +67,28 @@ def route_colors(
     return (near + (far - near) * t).astype(np.float32)
 
 
+def subject_mask(
+    z: np.ndarray,
+    fog01: np.ndarray,
+    z_sonar: float,
+    max_scan_m: float,
+    fog_threshold: float,
+    thickness_m: float,
+) -> np.ndarray:
+    """Which points belong to the subject (everything else is background and is discarded).
+
+    A point is kept only if it has a finite depth, is bright enough in the fog map
+    (``fog > fog_threshold``), lies within the scan range (``Z <= max_scan_m``) and is no more than
+    ``thickness_m`` behind the sonar anchor, which strips the wall and floating room dust.
+    """
+    return (
+        np.isfinite(z)
+        & (fog01 > fog_threshold)
+        & (z <= max_scan_m)
+        & (z - z_sonar <= thickness_m)
+    )
+
+
 class Stitcher:
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -114,7 +136,11 @@ class Stitcher:
         cx, cy = w / 2.0, h / 2.0
         vs, us = np.mgrid[0:h:STRIDE, 0:w:STRIDE]
         z = vf.z_metric[::STRIDE, ::STRIDE]
-        valid = np.isfinite(z)
+        vcfg = cfg.vision_and_fog
+        valid = subject_mask(
+            z, vf.i_fog[::STRIDE, ::STRIDE] / 255.0, vf.z_sonar,
+            vcfg.max_scan_distance_m, vcfg.fog_discard_threshold, vcfg.subject_thickness_m,
+        )
         u, v, z = us[valid].astype(np.float32), vs[valid].astype(np.float32), z[valid]
         if z.size == 0:
             return np.zeros((0, 3), np.float32), np.zeros((0, 3), np.float32)

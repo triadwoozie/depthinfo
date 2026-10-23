@@ -125,14 +125,37 @@ All modes feed the same hybrid equation, with the sonar as the metric anchor:
 Z(u,v) = Z_sonar + (D_rel(u,v) - D_anchor) * relief_depth_span_m
 ```
 
-`D_rel` is 0 for near and 1 for far; `D_anchor` is its median inside the acoustic beam cone
-(`acoustic_beam_deg`, default 20°). Each pixel is then unprojected through the pinhole model and
+`D_rel` is 0 for near and 1 for far; `D_anchor` is the depth of the *subject* inside the acoustic
+beam cone (`acoustic_beam_deg`, default 20°). It is taken as a low percentile
+(`anchor_percentile`, default 5) rather than the median, because the sonar reports the nearest
+reflector: a median over the cone lands on the background whenever the subject covers less than half
+of it, which pushes the subject in front of the sonar distance and the wall onto it. Each pixel is then unprojected through the pinhole model and
 the camera pose, so the cloud has true front-to-back relief. If a mode cannot run (for example the
 model file is missing) the dashboard shows why and the **Running:** badge shows the mode that is
 really active. The 3D tab and the Blender stream show the newest single frame; the exported scene
 uses the fused (stitched) cloud. The camera is read in its own thread; if it cannot be opened or
 disconnects, the app logs a warning, shows *Camera unavailable: synthetic video* and keeps
 retrying every 5 s.
+
+### Subject isolation (background culling)
+
+The 3D cloud keeps only points that are inside the scan range, brighter than the fog cutoff
+(`fog_discard_threshold`, default 0.12) **and** no more than `subject_thickness_m` (default 0.30 m)
+behind the sonar anchor; everything else (walls, floating room dust) is dropped. Both are sliders in
+*Spatial monitor*. The relief span is `relief_depth_span_m` (default 0.45 m, the nose-to-back-of-head
+depth of a person) and the fog falloff now defaults to **linear** (existing `config_state.json`
+files keep their saved value).
+
+**Calibrate the empty background first (wizard Round 3).** On a synthetic scene with known ground
+truth, isolation with a calibrated background kept 100% of the subject with under 2% background
+leakage; the cue heuristic alone cannot tell a wall from a person, and a gate alone cannot separate
+them if the anchor sits on the wall. The neural model's isolation has not been measured on a real
+person.
+
+For the neural mode, depth is normalised between its 2nd and 98th percentiles (not min-max, which one
+outlier pixel can ruin) and then passed through a subtle CLAHE pass (`depth_contrast_enhance`, a switch
+in the panel) to bring out nose, eyes and lips. CLAHE trades global relief (about 25% lower overall depth
+spread in a live test) for local detail, so compare with the switch on and off.
 
 ### Calibration wizard
 

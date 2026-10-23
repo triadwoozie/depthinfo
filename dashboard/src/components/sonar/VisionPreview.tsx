@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
+import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { API_BASE } from "@/lib/api"
@@ -177,6 +178,61 @@ function VisionPreviewView({ telemetry, config, onConfigChange }: VisionPreviewP
               onConfigChange({ scan_min_m, scan_max_m })
             }
           />
+          <div className="grid gap-4 rounded-md border p-3">
+            <div className="grid gap-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm">Subject thickness</Label>
+                <span className="text-sm tabular-nums text-muted-foreground">
+                  {config.subject_thickness_m.toFixed(2)} m
+                </span>
+              </div>
+              <Slider
+                aria-label="Subject thickness"
+                value={[config.subject_thickness_m]}
+                min={0.1}
+                max={1.5}
+                step={0.05}
+                onValueChange={([subject_thickness_m]) => onConfigChange({ subject_thickness_m })}
+              />
+              <p className="text-xs text-muted-foreground">
+                Points further behind the sonar distance than this are dropped from the 3D cloud
+                (walls, room dust).
+              </p>
+            </div>
+            <div className="grid gap-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm">Fog cutoff</Label>
+                <span className="text-sm tabular-nums text-muted-foreground">
+                  {config.fog_discard_threshold.toFixed(2)}
+                </span>
+              </div>
+              <Slider
+                aria-label="Fog cutoff"
+                value={[config.fog_discard_threshold]}
+                min={0}
+                max={0.6}
+                step={0.01}
+                onValueChange={([fog_discard_threshold]) => onConfigChange({ fog_discard_threshold })}
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-3">
+            <div className="space-y-0.5">
+              <Label htmlFor="depth-clahe" className="text-sm">
+                Facial contrast (CLAHE)
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                Local contrast on the neural depth to bring out nose, eyes and lips. Neural mode only.
+              </p>
+            </div>
+            <Switch
+              id="depth-clahe"
+              checked={config.depth_contrast_enhance}
+              onCheckedChange={(depth_contrast_enhance) => onConfigChange({ depth_contrast_enhance })}
+            />
+          </div>
+
           <div className="flex flex-wrap items-center justify-between gap-2">
             <Label className="text-sm">Fog falloff</Label>
             <ToggleGroup

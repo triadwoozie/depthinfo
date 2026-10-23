@@ -224,12 +224,16 @@ Intersect DoA cones with sonar range sphere $Z_{\text{sonar}}$ to obtain directi
   "vision_and_fog": {
     "min_scan_distance_m": 0.35,
     "max_scan_distance_m": 2.50,
-    "fog_falloff_curve": "exponential",
+    "fog_falloff_curve": "linear",
     "fog_density": 1.2,
     "fog_colormap": "mist_grayscale",
     "relief_depth_span_m": 0.45,
     "depth_inference_mode": "lightweight_fast",
     "acoustic_beam_deg": 20.0,
+    "anchor_percentile": 5.0,
+    "fog_discard_threshold": 0.12,
+    "subject_thickness_m": 0.30,
+    "depth_contrast_enhance": true,
     "temporal_stitch_frames": 5,
     "voxel_downsample_m": 0.01
   },

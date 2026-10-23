@@ -180,6 +180,12 @@ export interface OperatorConfig {
   scan_max_m: number
   fog_falloff_curve: FogFalloff
   depth_inference_mode: DepthMode
+  /** Subject isolation: max distance behind the sonar anchor that is kept (m). */
+  subject_thickness_m: number
+  /** Subject isolation: points with fog intensity at or below this (0..1) are dropped. */
+  fog_discard_threshold: number
+  /** CLAHE local-contrast pass on the neural depth (brings out facial topology). */
+  depth_contrast_enhance: boolean
   color_mode: ColorMode
   custom_near_hex: string
   custom_far_hex: string
@@ -295,8 +301,11 @@ export const DEFAULT_OPERATOR_CONFIG: OperatorConfig = {
   ping_rate_hz: 10,
   scan_min_m: 0.35,
   scan_max_m: 2.5,
-  fog_falloff_curve: "exponential",
+  fog_falloff_curve: "linear",
   depth_inference_mode: "lightweight_fast",
+  subject_thickness_m: 0.3,
+  fog_discard_threshold: 0.12,
+  depth_contrast_enhance: true,
   color_mode: "optical_rgb",
   custom_near_hex: "#00F5D4",
   custom_far_hex: "#3A0CA3",
@@ -366,6 +375,9 @@ export interface SystemConfig {
     max_scan_distance_m: number
     fog_falloff_curve: FogFalloff
     depth_inference_mode: DepthMode
+    subject_thickness_m: number
+    fog_discard_threshold: number
+    depth_contrast_enhance: boolean
     acoustic_beam_deg: number
     fog_density: number
     fog_colormap: string
@@ -414,6 +426,9 @@ export function systemToOperator(sys: SystemConfig, lastVolume: number): Operato
     scan_max_m: sys.vision_and_fog.max_scan_distance_m,
     fog_falloff_curve: sys.vision_and_fog.fog_falloff_curve,
     depth_inference_mode: sys.vision_and_fog.depth_inference_mode,
+    subject_thickness_m: sys.vision_and_fog.subject_thickness_m,
+    fog_discard_threshold: sys.vision_and_fog.fog_discard_threshold,
+    depth_contrast_enhance: sys.vision_and_fog.depth_contrast_enhance,
     color_mode: sys.blender_style.color_mode,
     custom_near_hex: sys.blender_style.custom_near_hex.toUpperCase(),
     custom_far_hex: sys.blender_style.custom_far_hex.toUpperCase(),
@@ -472,6 +487,15 @@ export function operatorPatchToSystem(
     set("vision_and_fog", { fog_falloff_curve: patch.fog_falloff_curve })
   }
 
+  if (patch.subject_thickness_m !== undefined) {
+    set("vision_and_fog", { subject_thickness_m: patch.subject_thickness_m })
+  }
+  if (patch.depth_contrast_enhance !== undefined) {
+    set("vision_and_fog", { depth_contrast_enhance: patch.depth_contrast_enhance })
+  }
+  if (patch.fog_discard_threshold !== undefined) {
+    set("vision_and_fog", { fog_discard_threshold: patch.fog_discard_threshold })
+  }
   if (patch.depth_inference_mode !== undefined) {
     set("vision_and_fog", { depth_inference_mode: patch.depth_inference_mode })
   }

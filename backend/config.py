@@ -146,14 +146,29 @@ DepthMode = Literal["disabled", "lightweight_fast", "neural_onnx"]
 class VisionAndFogConfig(_Model):
     min_scan_distance_m: float = Field(default=0.35, ge=0.0, le=10.0)
     max_scan_distance_m: float = Field(default=2.50, ge=0.1, le=10.0)
-    fog_falloff_curve: FalloffCurve = "exponential"
+    # linear keeps uniform contrast across the foreground (exponential flattens the near field)
+    fog_falloff_curve: FalloffCurve = "linear"
     fog_density: float = Field(default=1.2, ge=0.0, le=10.0)
     fog_colormap: FogColormap = "mist_grayscale"
+    # Front-to-back depth of the subject (nose tip to back of head): 0.35 to 0.50 m for a person.
     relief_depth_span_m: float = Field(default=0.45, ge=0.0, le=5.0)
+    # Subject isolation (stitcher): drop points whose fog intensity (0..1) is at or below this ...
+    fog_discard_threshold: float = Field(default=0.12, ge=0.0, le=1.0)
+    # ... and points more than this far behind the sonar anchor. The hybrid model only places
+    # background about one relief span behind the subject, so a pure max-distance gate cannot
+    # remove a wall that is nearer than max_scan_distance_m.
+    subject_thickness_m: float = Field(default=0.30, ge=0.05, le=2.0)
+    # CLAHE on the normalised neural disparity to bring out facial topology.
+    depth_contrast_enhance: bool = True
     # disabled: flat plane at Z_sonar | lightweight_fast: CPU heuristic | neural_onnx: Depth-Anything-V2
     depth_inference_mode: DepthMode = "lightweight_fast"
     # Half-angle of the acoustic beam cone whose median relative depth anchors the relief to Z_sonar.
     acoustic_beam_deg: float = Field(default=20.0, ge=2.0, le=60.0)
+    # Which percentile of D_rel inside the beam cone is treated as "the subject" and pinned to
+    # Z_sonar. The sonar returns the NEAREST reflector, so this must lean to the near side: the
+    # median (50) lands on the background whenever the subject fills less than half the cone, and
+    # even 25 does if it fills less than a quarter (a head is a few percent of a 20 degree cone).
+    anchor_percentile: float = Field(default=5.0, ge=0.5, le=50.0)
     temporal_stitch_frames: int = Field(default=5, ge=1, le=60)
     voxel_downsample_m: float = Field(default=0.01, ge=0.001, le=0.5)
 

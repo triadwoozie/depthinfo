@@ -374,6 +374,28 @@ def build_optimized_session(model_path: str | Path) -> "ort.InferenceSession":
     return session
 
 
+def percentile_normalize(x: np.ndarray, low: float = 2.0, high: float = 98.0) -> np.ndarray:
+    """Scale ``x`` to [0, 1] between its 2nd and 98th percentiles.
+
+    Plain min-max normalisation lets one stray pixel (a specular glint, a far window) set the whole
+    range and squeezes a face into a sliver of it; clipping the tails keeps the subject's range.
+    """
+    p_low, p_high = np.percentile(x, (low, high))
+    clipped = np.clip(x, p_low, p_high)
+    return ((clipped - p_low) / (p_high - p_low + 1e-6)).astype(np.float32)
+
+
+def enhance_local_contrast(norm01: np.ndarray, clip_limit: float = 2.0, grid: tuple[int, int] = (8, 8)) -> np.ndarray:
+    """Subtle CLAHE on a normalised float32 disparity map (via 16-bit, so no banding).
+
+    Pulls out high-frequency topology (nose bridge, eye sockets, cheekbones, lips) locally,
+    with the clip limit keeping it from tearing edges. Output stays in [0, 1].
+    """
+    clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=grid)
+    out = clahe.apply((np.clip(norm01, 0.0, 1.0) * 65535.0).astype(np.uint16))
+    return out.astype(np.float32) / 65535.0
+
+
 class NeuralDepthWorker:
     """Depth-Anything-V2-Small in its own thread, feeding a shared depth cache.
 
@@ -440,7 +462,7 @@ class NeuralDepthWorker:
         return build_optimized_session(path)
 
     @staticmethod
-    def _infer(session, input_name: str, frame_bgr: np.ndarray) -> np.ndarray:
+    def _infer(session, input_name: str, frame_bgr: np.ndarray, enhance: bool = True) -> np.ndarray:
         h, w = frame_bgr.shape[:2]
         rgb = cv2.cvtColor(cv2.resize(frame_bgr, (MODEL_INPUT, MODEL_INPUT)), cv2.COLOR_BGR2RGB)
         x = (rgb.astype(np.float32) / 255.0 - _IMAGENET_MEAN) / _IMAGENET_STD
@@ -449,8 +471,9 @@ class NeuralDepthWorker:
             dtype=np.float32,
         )
         inv = cv2.resize(out.reshape(out.shape[-2], out.shape[-1]), (w, h), interpolation=cv2.INTER_LINEAR)
-        inv -= inv.min()
-        inv /= max(float(inv.max()), 1e-6)
+        inv = percentile_normalize(inv)  # robust to outliers, unlike min-max
+        if enhance:
+            inv = enhance_local_contrast(inv)
         return 1.0 - inv  # model output is inverse depth (near = 1); D_rel has near = 0
 
     def _run(self) -> None:
@@ -474,7 +497,7 @@ class NeuralDepthWorker:
                 continue
             t0 = time.perf_counter()
             try:
-                d_rel = self._infer(session, name, frame)
+                d_rel = self._infer(session, name, frame, get_config().vision_and_fog.depth_contrast_enhance)
             except Exception as exc:
                 self.error, self.state = f"inference failed: {exc}", "error"
                 log(f"WARNING: {self.error}")
@@ -502,14 +525,22 @@ def beam_mask(h: int, w: int, fov_deg: float, beam_deg: float) -> np.ndarray:
     return (xx - w / 2.0) ** 2 + (yy - h / 2.0) ** 2 <= radius**2
 
 
-def anchor_depth(d_rel: np.ndarray, mask: np.ndarray) -> float:
-    """D_anchor: median relative depth of the subject inside the acoustic beam cone."""
-    return float(np.median(d_rel[mask])) if mask.any() else float(np.median(d_rel))
+def anchor_depth(d_rel: np.ndarray, mask: np.ndarray, percentile: float = 50.0) -> float:
+    """D_anchor: relative depth of the subject inside the acoustic beam cone.
+
+    ``percentile=50`` is the median. The pipeline uses a lower value (``anchor_percentile``)
+    because the sonar reports the nearest reflector, and a median over the cone is dominated by
+    the background whenever the subject covers less than half of it.
+    """
+    values = d_rel[mask] if mask.any() else d_rel
+    return float(np.percentile(values, percentile))
 
 
-def hybrid_metric_depth(d_rel: np.ndarray, z_sonar: float, relief_m: float, mask: np.ndarray) -> np.ndarray:
+def hybrid_metric_depth(
+    d_rel: np.ndarray, z_sonar: float, relief_m: float, mask: np.ndarray, anchor_percentile: float = 50.0
+) -> np.ndarray:
     """Z(u,v) = Z_sonar + (D_rel(u,v) − D_anchor) · S_relief   (metres)."""
-    return z_sonar + (d_rel - anchor_depth(d_rel, mask)) * relief_m
+    return z_sonar + (d_rel - anchor_depth(d_rel, mask, anchor_percentile)) * relief_m
 
 
 # ---------------------------------------------------------------------------
@@ -697,7 +728,7 @@ class VisionPipeline:
         for f in self._collect(n, 10.0):
             h, w = f.d_rel.shape
             mask = beam_mask(h, w, cfg.hardware.camera_fov_deg, cfg.vision_and_fog.acoustic_beam_deg)
-            vals.append(anchor_depth(f.d_rel, mask))
+            vals.append(anchor_depth(f.d_rel, mask, cfg.vision_and_fog.anchor_percentile))
         return float(np.median(vals)) if vals else 0.0
 
     # -- main loop ---------------------------------------------------------
@@ -752,7 +783,7 @@ class VisionPipeline:
         d_rel = self._relative_depth(frame, vf.depth_inference_mode)
         h, w = d_rel.shape
         cone = beam_mask(h, w, cfg.hardware.camera_fov_deg, vf.acoustic_beam_deg)
-        z = hybrid_metric_depth(d_rel, z_sonar, vf.relief_depth_span_m, cone)
+        z = hybrid_metric_depth(d_rel, z_sonar, vf.relief_depth_span_m, cone, vf.anchor_percentile)
 
         if cfg.calibration.background_fog_captured and self.bg_gray is not None:
             z = np.where(foreground_mask(frame, self.bg_gray), z, np.inf)  # empty-room pixels out
