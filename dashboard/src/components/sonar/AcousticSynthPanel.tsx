@@ -1,9 +1,9 @@
 "use client"
 
 import { memo } from "react"
-import { AudioWaveform, Radio } from "lucide-react"
+import { Radio } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Select,
   SelectContent,
@@ -11,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
 import { CalibrationState, OperatorConfig, WaveformType } from "@/types/sonar"
 
@@ -28,19 +29,14 @@ function AcousticSynthPanelView({
   onConfigChange,
 }: AcousticSynthPanelProps) {
   return (
-    <Card className="instrument-card">
-      <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
-        <div className="flex items-center gap-2.5">
-          <div className="icon-tile text-cyan-300">
-            <AudioWaveform className="h-4 w-4" />
-          </div>
-          <div>
-            <CardTitle className="instrument-title">Acoustic synth</CardTitle>
-            <p className="instrument-kicker">Emission &amp; echo gate</p>
-          </div>
+    <Card>
+      <CardHeader className="flex-row items-start justify-between space-y-0">
+        <div className="space-y-1.5">
+          <CardTitle>Acoustic synth</CardTitle>
+          <CardDescription>Emission and echo gate</CardDescription>
         </div>
-        <Badge variant="outline" className="instrument-badge text-cyan-300">
-          <Radio className="mr-1.5 h-3 w-3" />
+        <Badge variant="outline" className="gap-1.5 font-normal">
+          <Radio className="h-3 w-3" />
           48 kHz
         </Badge>
       </CardHeader>
@@ -53,7 +49,7 @@ function AcousticSynthPanelView({
               onConfigChange({ waveform: waveform as WaveformType })
             }
           >
-            <SelectTrigger className="h-9 w-full rounded-lg border-zinc-700/80 bg-zinc-950/70 text-xs text-zinc-200">
+            <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -122,11 +118,12 @@ function AcousticSynthPanelView({
           </div>
         </div>
 
-        <div className="flex items-center justify-between rounded-lg border border-zinc-800/80 bg-zinc-950/60 px-3 py-2">
-          <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">
-            Echo threshold
-          </span>
-          <div className="flex w-1/2 items-center gap-3">
+        <div className="space-y-2">
+          <FieldHeading
+            label="Echo threshold"
+            value={`${Math.round(calibration.detection_threshold * 100)}%`}
+          />
+          <div>
             <Slider
               aria-label="Echo detection threshold"
               value={[calibration.detection_threshold]}
@@ -137,9 +134,6 @@ function AcousticSynthPanelView({
                 onCalibrationChange({ detection_threshold })
               }
             />
-            <span className="w-9 text-right font-mono text-[10px] tabular-nums text-emerald-300">
-              {Math.round(calibration.detection_threshold * 100)}%
-            </span>
           </div>
         </div>
       </CardContent>
@@ -150,8 +144,8 @@ function AcousticSynthPanelView({
 function FieldHeading({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between">
-      <span className="instrument-label">{label}</span>
-      <span className="font-mono text-[11px] tabular-nums text-zinc-200">{value}</span>
+      <Label className="text-sm">{label}</Label>
+      <span className="text-sm tabular-nums text-muted-foreground">{value}</span>
     </div>
   )
 }

@@ -1,16 +1,13 @@
 "use client"
 
 import { memo, useState } from "react"
-import {
-  Box,
-  Download,
-  LoaderCircle,
-  Palette,
-  Sparkles,
-} from "lucide-react"
+import { Download, LoaderCircle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Label } from "@/components/ui/label"
+import { Separator } from "@/components/ui/separator"
 import {
   Dialog,
   DialogContent,
@@ -81,68 +78,59 @@ function ExportDrawerView({ config, onConfigChange }: ExportDrawerProps) {
 
   return (
     <>
-      <Card className="instrument-card">
-        <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
-          <div className="flex items-center gap-2.5">
-            <div className="icon-tile text-violet-300">
-              <Palette className="h-4 w-4" />
-            </div>
-            <div>
-              <CardTitle className="instrument-title">Blender finish</CardTitle>
-              <p className="instrument-kicker">Point cloud appearance</p>
-            </div>
+      <Card>
+        <CardHeader className="flex-row items-start justify-between space-y-0">
+          <div className="space-y-1.5">
+            <CardTitle>Blender finish</CardTitle>
+            <CardDescription>Point cloud appearance and scene export</CardDescription>
           </div>
-          <Badge variant="outline" className="instrument-badge">
-            <Box className="mr-1.5 h-3 w-3" />
-            EXPORT
+          <Badge variant="outline" className="font-normal">
+            Export
           </Badge>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <p className="instrument-label">Vertex color mode</p>
+          <div className="grid gap-2">
+            <Label className="text-sm">Vertex color mode</Label>
             <Select
               value={config.color_mode}
               onValueChange={(color_mode) =>
                 onConfigChange({ color_mode: color_mode as ColorMode })
               }
             >
-              <SelectTrigger className="h-10 w-full rounded-lg border-zinc-700/80 bg-zinc-950/70 text-xs text-zinc-200">
+              <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 {colorModes.map((mode) => (
                   <SelectItem key={mode.value} value={mode.value}>
-                    <span className="flex flex-col py-0.5">
-                      <span>{mode.title}</span>
-                      <span className="text-[10px] text-zinc-500">{mode.description}</span>
-                    </span>
+                    {mode.title}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            <p className="text-xs text-muted-foreground">{selectedMode?.description}</p>
           </div>
 
-          <div className="flex items-center justify-between">
-            <span className="instrument-label">Near / far palette</span>
-            <span className="text-[9px] text-zinc-600">HEX</span>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <ColorSwatch
-              label="NEAR"
-              value={config.custom_near_hex}
-              onChange={(custom_near_hex) => onConfigChange({ custom_near_hex })}
-            />
-            <ColorSwatch
-              label="FAR"
-              value={config.custom_far_hex}
-              onChange={(custom_far_hex) => onConfigChange({ custom_far_hex })}
-            />
+          <div className="grid gap-2">
+            <Label className="text-sm">Near / far palette</Label>
+            <div className="grid grid-cols-2 gap-2">
+              <ColorSwatch
+                label="Near"
+                value={config.custom_near_hex}
+                onChange={(custom_near_hex) => onConfigChange({ custom_near_hex })}
+              />
+              <ColorSwatch
+                label="Far"
+                value={config.custom_far_hex}
+                onChange={(custom_far_hex) => onConfigChange({ custom_far_hex })}
+              />
+            </div>
           </div>
 
-          <div className="space-y-2">
+          <div className="grid gap-2">
             <div className="flex items-center justify-between">
-              <span className="instrument-label">Point radius</span>
-              <span className="font-mono text-[10px] tabular-nums text-zinc-300">
+              <Label className="text-sm">Point radius</Label>
+              <span className="text-sm tabular-nums text-muted-foreground">
                 {config.point_radius_mm.toFixed(1)} mm
               </span>
             </div>
@@ -156,54 +144,42 @@ function ExportDrawerView({ config, onConfigChange }: ExportDrawerProps) {
             />
           </div>
 
-          <div className="h-px bg-zinc-800/80" />
-          <div className="flex items-center justify-between text-[10px] text-zinc-500">
-            <span>Scene package</span>
-            <span className="font-mono text-zinc-400">.blend · .glb · .ply</span>
-          </div>
-          <Button
-            size="lg"
-            onClick={exportScene}
-            disabled={exporting}
-            className="h-11 w-full rounded-xl bg-emerald-600 text-xs font-semibold tracking-wide text-white shadow-[0_0_22px_rgba(16,185,129,0.14)] hover:bg-emerald-500"
-          >
+          <Separator />
+          <Button onClick={exportScene} disabled={exporting} className="w-full">
             {exporting ? (
               <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
             ) : (
-              <Sparkles className="mr-2 h-4 w-4" />
+              <Download className="mr-2 h-4 w-4" />
             )}
             Export static .blend scene
           </Button>
-          <p className="text-center text-[9px] leading-relaxed text-zinc-600">
-            {selectedMode?.description ?? "Color and geometry settings"} · uses latest scan
+          <p className="text-center text-xs text-muted-foreground">
+            Writes .blend, .glb and .ply from the latest scan
           </p>
         </CardContent>
       </Card>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-md border-zinc-800 bg-zinc-950 text-zinc-100">
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-sm">
-              <Download className="h-4 w-4 text-emerald-300" />
+            <DialogTitle>
               Static scene export
             </DialogTitle>
-            <DialogDescription className="text-xs text-zinc-500">
+            <DialogDescription>
               Blender project and portable geometry files.
             </DialogDescription>
           </DialogHeader>
           {exporting && (
-            <div className="flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
-              <LoaderCircle className="h-4 w-4 animate-spin text-emerald-300" />
-              <span className="text-xs text-zinc-300">Preparing scene package…</span>
+            <div className="flex items-center gap-3 rounded-md border p-4">
+              <LoaderCircle className="h-4 w-4 animate-spin" />
+              <span className="text-sm">Preparing scene package…</span>
             </div>
           )}
           {error && (
-            <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.06] p-4">
-              <p className="text-xs font-medium text-amber-200">Export failed</p>
-              <p className="mt-1 break-all text-[10px] leading-relaxed text-amber-100/60">
-                {error}
-              </p>
-            </div>
+            <Alert variant="destructive">
+              <AlertTitle>Export failed</AlertTitle>
+              <AlertDescription className="break-all">{error}</AlertDescription>
+            </Alert>
           )}
           {files && (
             <div className="grid gap-2">
@@ -240,22 +216,18 @@ function ColorSwatch({
   onChange: (value: string) => void
 }) {
   return (
-    <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950/60 p-2">
-      <span
-        className="h-7 w-7 shrink-0 rounded-md border border-white/10"
-        style={{ backgroundColor: value }}
-      />
-      <span className="min-w-0 flex-1">
-        <span className="block text-[9px] font-semibold tracking-wider text-zinc-500">{label}</span>
-        <span className="block truncate font-mono text-[10px] text-zinc-300">{value}</span>
-      </span>
+    <label className="flex cursor-pointer items-center gap-2 rounded-md border p-2">
       <input
         type="color"
         aria-label={`${label.toLowerCase()} palette color`}
         value={value}
         onChange={(event) => onChange(event.target.value.toUpperCase())}
-        className="h-6 w-6 cursor-pointer rounded border-0 bg-transparent p-0"
+        className="h-7 w-7 shrink-0 cursor-pointer rounded border-0 bg-transparent p-0"
       />
+      <span className="min-w-0 flex-1 leading-tight">
+        <span className="block text-xs text-muted-foreground">{label}</span>
+        <span className="block truncate text-sm tabular-nums">{value}</span>
+      </span>
     </label>
   )
 }
@@ -263,23 +235,20 @@ function ColorSwatch({
 function DownloadLink({ label, href }: { label: string; href?: string }) {
   if (!href) {
     return (
-      <div className="flex items-center justify-between rounded-lg border border-zinc-800 px-3 py-2 text-xs text-zinc-600">
+      <div className="flex items-center justify-between rounded-md border px-3 py-2 text-sm text-muted-foreground">
         <span>{label}</span>
         <span>Not provided</span>
       </div>
     )
   }
 
-  const target = apiUrl(href)
   return (
-    <a
-      href={target}
-      download
-      className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/50 px-3 py-2 text-xs text-zinc-300 transition hover:border-emerald-500/40 hover:text-emerald-200"
-    >
-      <span>{label}</span>
-      <Download className="h-3.5 w-3.5" />
-    </a>
+    <Button variant="outline" asChild className="justify-between">
+      <a href={apiUrl(href)} download>
+        <span>{label}</span>
+        <Download className="h-4 w-4" />
+      </a>
+    </Button>
   )
 }
 

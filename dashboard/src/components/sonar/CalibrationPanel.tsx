@@ -14,8 +14,7 @@
 
 "use client"
 
-import { Badge } from "@/components/ui/badge"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { Slider } from "@/components/ui/slider"
 import { CalibrationState } from "@/types/sonar"
@@ -54,13 +53,11 @@ function SliderRow({
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-mono text-zinc-400 uppercase tracking-wide">
-          {label}
-        </span>
-        <Badge variant="outline" className="font-mono text-xs border-zinc-700 text-emerald-400 min-w-[64px] justify-end">
+        <Label className="text-sm">{label}</Label>
+        <span className="text-sm tabular-nums text-muted-foreground">
           {display}
-          {unit && <span className="text-zinc-500 ml-0.5">{unit}</span>}
-        </Badge>
+          {unit && <span className="ml-0.5">{unit}</span>}
+        </span>
       </div>
       <Slider
         value={[value]}
@@ -75,9 +72,7 @@ function SliderRow({
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
-    <p className="text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-widest pt-1">
-      {children}
-    </p>
+    <h4 className="pt-1 text-sm font-semibold">{children}</h4>
   )
 }
 
@@ -87,14 +82,8 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 
 export function CalibrationPanel({ calibration: cal, onChange, className }: CalibrationPanelProps) {
   return (
-    <Card className={`instrument-card ${className ?? ""}`}>
-      <CardHeader className="pb-2">
-        <CardTitle className="instrument-title">
-          Calibration parameters
-        </CardTitle>
-      </CardHeader>
-
-      <CardContent className="flex flex-col gap-4">
+    <div className={className}>
+      <div className="flex flex-col gap-4">
         {/* ── 1. Chirp ──────────────────────────────── */}
         <SectionTitle>Chirp Synthesis</SectionTitle>
 
@@ -128,7 +117,7 @@ export function CalibrationPanel({ calibration: cal, onChange, className }: Cali
           onChange={(v) => onChange({ chirp_duration_ms: v })}
         />
 
-        <Separator className="bg-zinc-800" />
+        <Separator />
 
         {/* ── 2. Gating ─────────────────────────────── */}
         <SectionTitle>Acoustic Gating</SectionTitle>
@@ -152,7 +141,7 @@ export function CalibrationPanel({ calibration: cal, onChange, className }: Cali
           onChange={(v) => onChange({ detection_threshold: v })}
         />
 
-        <Separator className="bg-zinc-800" />
+        <Separator />
 
         {/* ── 3. Depth post-processing ──────────────── */}
         <SectionTitle>Depth Post-Processing</SectionTitle>
@@ -184,7 +173,7 @@ export function CalibrationPanel({ calibration: cal, onChange, className }: Cali
           onChange={(v) => onChange({ smoothing_alpha: v })}
         />
 
-        <Separator className="bg-zinc-800" />
+        <Separator />
 
         {/* ── 4. Autopilot ──────────────────────────── */}
         <SectionTitle>Autopilot</SectionTitle>
@@ -198,7 +187,7 @@ export function CalibrationPanel({ calibration: cal, onChange, className }: Cali
           unit="s"
           onChange={(v) => onChange({ autopilot_timeout_sec: v })}
         />
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   )
 }

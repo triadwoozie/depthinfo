@@ -1,9 +1,10 @@
 "use client"
 
 import { memo, useEffect, useRef, useState } from "react"
-import { Box, Camera, CloudFog, Scan, Signal } from "lucide-react"
+import { Box, Camera, CloudFog } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
@@ -24,46 +25,35 @@ function VisionPreviewView({ config, onConfigChange }: VisionPreviewProps) {
   const range = [config.scan_min_m, config.scan_max_m]
 
   return (
-    <Card className="instrument-card overflow-hidden">
-      <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
-        <div className="flex items-center gap-2.5">
-          <div className="icon-tile text-cyan-300">
-            <Scan className="h-4 w-4" />
-          </div>
-          <div>
-            <CardTitle className="instrument-title">Spatial monitor</CardTitle>
-            <p className="instrument-kicker">Optical · acoustic · metric depth</p>
-          </div>
+    <Card>
+      <CardHeader className="flex-row items-start justify-between space-y-0">
+        <div className="space-y-1.5">
+          <CardTitle>Spatial monitor</CardTitle>
+          <CardDescription>Optical, acoustic and metric depth views</CardDescription>
         </div>
-        <div className="flex items-center gap-2">
-          <Badge variant="outline" className="instrument-badge">
-            <Signal className="mr-1.5 h-3 w-3 text-emerald-300" />
-            SPATIAL VIEW
-          </Badge>
-          <Badge variant="outline" className="instrument-badge hidden sm:flex">
-            Z-DEPTH / 4 M
-          </Badge>
-        </div>
+        <Badge variant="outline" className="hidden font-normal sm:flex">
+          Z-depth 0 to 4 m
+        </Badge>
       </CardHeader>
 
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-6">
         <Tabs defaultValue="fog" className="w-full">
-          <TabsList className="h-10 w-full justify-start gap-1 rounded-xl border border-zinc-800/80 bg-zinc-950/70 p-1">
-            <TabsTrigger value="fog" className="h-8 flex-1 rounded-lg text-[10px] uppercase tracking-wider sm:flex-none">
-              <CloudFog className="mr-1.5 h-3.5 w-3.5" />
+          <TabsList>
+            <TabsTrigger value="fog">
+              <CloudFog className="mr-2 h-4 w-4" />
               Fog map
             </TabsTrigger>
-            <TabsTrigger value="optical" className="h-8 flex-1 rounded-lg text-[10px] uppercase tracking-wider sm:flex-none">
-              <Camera className="mr-1.5 h-3.5 w-3.5" />
+            <TabsTrigger value="optical">
+              <Camera className="mr-2 h-4 w-4" />
               Optical
             </TabsTrigger>
-            <TabsTrigger value="cloud" className="h-8 flex-1 rounded-lg text-[10px] uppercase tracking-wider sm:flex-none">
-              <Box className="mr-1.5 h-3.5 w-3.5" />
+            <TabsTrigger value="cloud">
+              <Box className="mr-2 h-4 w-4" />
               3D cloud
             </TabsTrigger>
           </TabsList>
 
-          <div className="relative mt-3 h-[280px] overflow-hidden rounded-xl border border-zinc-800/80 bg-zinc-950">
+          <div className="relative mt-4 h-[280px] overflow-hidden rounded-md border bg-black">
             <TabsContent value="fog" className="m-0 h-full">
               <MjpegView
                 src={FOG_URL}
@@ -86,17 +76,16 @@ function VisionPreviewView({ config, onConfigChange }: VisionPreviewProps) {
           </div>
         </Tabs>
 
-        <div className="space-y-3 rounded-xl border border-zinc-800/80 bg-zinc-950/55 px-4 py-3">
+        <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <p className="instrument-label">Active scan frustum</p>
-              <p className="mt-1 font-mono text-xs tabular-nums text-zinc-200">
-                {config.scan_min_m.toFixed(2)} m <span className="text-zinc-600">—</span>{" "}
-                {config.scan_max_m.toFixed(2)} m
+            <div className="space-y-1">
+              <Label className="text-sm">Active scan range</Label>
+              <p className="text-sm tabular-nums text-muted-foreground">
+                {config.scan_min_m.toFixed(2)} m to {config.scan_max_m.toFixed(2)} m
               </p>
             </div>
-            <Badge variant="outline" className="instrument-badge text-cyan-300">
-              {Math.round((config.scan_max_m - config.scan_min_m) * 100)} cm depth
+            <Badge variant="secondary" className="font-normal tabular-nums">
+              {Math.round((config.scan_max_m - config.scan_min_m) * 100)} cm deep
             </Badge>
           </div>
           <Slider
@@ -109,27 +98,27 @@ function VisionPreviewView({ config, onConfigChange }: VisionPreviewProps) {
             onValueChange={([scan_min_m, scan_max_m]) =>
               onConfigChange({ scan_min_m, scan_max_m })
             }
-            className="[&_[role=slider]]:h-4 [&_[role=slider]]:w-4 [&>span>span]:bg-cyan-500"
           />
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="instrument-label">Fog falloff</span>
+            <Label className="text-sm">Fog falloff</Label>
             <ToggleGroup
               type="single"
+              variant="outline"
+              size="sm"
               value={config.fog_falloff_curve}
               onValueChange={(fog_falloff_curve) => {
                 if (fog_falloff_curve) {
                   onConfigChange({ fog_falloff_curve: fog_falloff_curve as FogFalloff })
                 }
               }}
-              className="rounded-lg border border-zinc-800 bg-zinc-950 p-0.5"
             >
-              <ToggleGroupItem value="linear" aria-label="Linear falloff" className="h-7 rounded-md px-2 text-[9px] uppercase tracking-wider">
+              <ToggleGroupItem value="linear" aria-label="Linear falloff">
                 Linear
               </ToggleGroupItem>
-              <ToggleGroupItem value="exponential" aria-label="Exponential falloff" className="h-7 rounded-md px-2 text-[9px] uppercase tracking-wider">
+              <ToggleGroupItem value="exponential" aria-label="Exponential falloff">
                 Exponential
               </ToggleGroupItem>
-              <ToggleGroupItem value="squared" aria-label="Squared falloff" className="h-7 rounded-md px-2 text-[9px] uppercase tracking-wider">
+              <ToggleGroupItem value="squared" aria-label="Squared falloff">
                 Squared
               </ToggleGroupItem>
             </ToggleGroup>
@@ -177,7 +166,7 @@ function MjpegView({
   }, [failed])
 
   return (
-    <div className="relative flex h-full items-center justify-center bg-[#080c12]">
+    <div className="relative flex h-full items-center justify-center bg-black">
       {!failed && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
@@ -373,7 +362,7 @@ function CloudView() {
 
   return (
     <div
-      className="relative flex h-full items-center justify-center overflow-hidden bg-[#080c12]"
+      className="relative flex h-full items-center justify-center overflow-hidden bg-black"
       onPointerDown={(event) => {
         rotationRef.current.dragging = true
         rotationRef.current.lastX = event.clientX
@@ -400,13 +389,13 @@ function CloudView() {
       }}
       style={{ touchAction: "none", cursor: "grab" }}
     >
-      <div className="absolute inset-0 opacity-60 [background-image:linear-gradient(rgba(63,63,70,.15)_1px,transparent_1px),linear-gradient(90deg,rgba(63,63,70,.15)_1px,transparent_1px)] [background-size:32px_32px]" />
+      <div className="absolute inset-0 opacity-0" />
       <canvas ref={canvasRef} aria-label="Interactive 3D live point cloud" className="relative h-full w-full" />
-      <div className="absolute left-4 top-4 rounded-md border border-cyan-400/15 bg-zinc-950/70 px-2.5 py-1.5 font-mono text-[9px] uppercase tracking-wider text-cyan-200/80">
+      <div className="absolute left-3 top-3 rounded-md border bg-background/80 px-2 py-1 text-xs text-muted-foreground">
         {cloudStatus}
       </div>
-      <div className="absolute bottom-4 right-4 font-mono text-[9px] text-zinc-600">
-        {webglError ?? "DRAG TO ORBIT · WEBGL2"}
+      <div className="absolute bottom-3 right-3 text-xs text-muted-foreground">
+        {webglError ?? "Drag to orbit"}
       </div>
     </div>
   )
@@ -460,13 +449,12 @@ function normalizeCloud(points: number[][], colors: number[][]) {
 function StreamPlaceholder({ title, detail }: { title: string; detail: string }) {
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center">
-      <div className="relative grid h-14 w-14 place-items-center rounded-2xl border border-zinc-700/70 bg-zinc-900/80 text-zinc-500">
+      <div className="grid h-12 w-12 place-items-center rounded-md border bg-muted text-muted-foreground">
         <Camera className="h-5 w-5" />
-        <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border-2 border-zinc-950 bg-amber-400" />
       </div>
       <div>
-        <p className="text-xs font-medium text-zinc-300">{title}</p>
-        <p className="mt-1 max-w-xs text-[10px] leading-relaxed text-zinc-500">{detail}</p>
+        <p className="text-sm font-medium">{title}</p>
+        <p className="mt-1 max-w-xs text-xs text-muted-foreground">{detail}</p>
       </div>
     </div>
   )
