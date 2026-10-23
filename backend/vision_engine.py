@@ -24,7 +24,7 @@ from typing import Callable
 
 import numpy as np
 
-from config import settings
+from config import get_dashboard_config, settings
 
 try:
     import cv2  # type: ignore
@@ -156,10 +156,14 @@ class VisionEngine:
             self._mock_loop()
             return
 
-        cap = cv2.VideoCapture(settings.camera_index)
+        configured_camera = get_dashboard_config().camera_device_index
+        camera_index = (
+            settings.camera_index if configured_camera is None else configured_camera
+        )
+        cap = cv2.VideoCapture(camera_index)
         if not cap.isOpened():
             print(
-                f"[VisionEngine] Cannot open camera {settings.camera_index} "
+                f"[VisionEngine] Cannot open camera {camera_index} "
                 "— falling back to mock mode."
             )
             self._mock_loop()

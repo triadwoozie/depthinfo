@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from config import CalibrationState, settings
+from config import CalibrationState, get_dashboard_config, settings
 
 # Lazily imported to avoid ImportError in mock mode when sounddevice not installed
 try:
@@ -112,16 +112,30 @@ class SonarEngine:
         """
         sr = settings.sample_rate
         duration = cal.chirp_duration_ms / 1000.0
-        t = np.linspace(0, duration, int(sr * duration), endpoint=False, dtype=np.float32)
-        # Instantaneous phase: φ(t) = 2π [ f0*t + (f1-f0)/(2*T) * t² ]
-        phase = 2 * np.pi * (
-            cal.chirp_f_start * t
-            + (cal.chirp_f_end - cal.chirp_f_start) / (2 * duration) * t ** 2
-        )
-        chirp = np.sin(phase)
-        # Hann window to suppress sidelobes
-        chirp *= np.hanning(len(t)).astype(np.float32)
-        return chirp
+        operator = get_dashboard_config()
+        t = np.arange(int(sr * duration), dtype=np.float32) / sr
+        if operator.waveform == "audible_ping":
+            phase = 2 * np.pi * 1000.0 * t
+        elif operator.waveform == "log_chirp" and cal.chirp_f_start != cal.chirp_f_end:
+            log_ratio = np.log(cal.chirp_f_end / cal.chirp_f_start)
+            phase = (
+                2
+                * np.pi
+                * cal.chirp_f_start
+                * duration
+                / log_ratio
+                * (np.exp((t / duration) * log_ratio) - 1)
+            )
+        else:
+            phase = 2 * np.pi * (
+                cal.chirp_f_start * t
+                + (cal.chirp_f_end - cal.chirp_f_start) / (2 * duration) * t**2
+            )
+        window = np.hanning(len(t)).astype(np.float32)
+        chirp = np.tanh(operator.speaker_volume * window * np.sin(phase))
+        if operator.silent_mode:
+            chirp.fill(0)
+        return chirp.astype(np.float32)
 
     # ------------------------------------------------------------------
     # DSP helpers
@@ -214,10 +228,18 @@ class SonarEngine:
         sr = settings.sample_rate
 
         while self._running:
+            cycle_start = time.monotonic()
             from config import calibration as cal
 
             chirp = self._make_chirp(cal)
             n_frames = len(chirp)
+            operator = get_dashboard_config()
+            device = settings.audio_device_index
+            if operator.audio_input_device_id is not None or operator.audio_output_device_id is not None:
+                device = (
+                    operator.audio_input_device_id,
+                    operator.audio_output_device_id,
+                )
 
             try:
                 # Full-duplex: play chirp, simultaneously record
@@ -225,7 +247,7 @@ class SonarEngine:
                     chirp.reshape(-1, 1),
                     samplerate=sr,
                     channels=1,
-                    device=settings.audio_device_index,
+                    device=device,
                     dtype="float32",
                 )
                 sd.wait()
@@ -269,6 +291,8 @@ class SonarEngine:
             )
             with self._lock:
                 self._latest = reading
+            interval = 1.0 / operator.ping_rate_hz
+            time.sleep(max(0.0, interval - (time.monotonic() - cycle_start)))
 
     # ------------------------------------------------------------------
     # Mock loop (no hardware required)
@@ -284,12 +308,12 @@ class SonarEngine:
           - A moving echo peak oscillating between 0.5 m and 2.5 m at 0.15 Hz
         """
         rng = np.random.default_rng(42)
-        interval = 1.0 / max(settings.ws_hz, 15.0)
-
         while self._running:
             from config import calibration as cal
 
             t = time.monotonic()
+            operator = get_dashboard_config()
+            interval = 1.0 / operator.ping_rate_hz
 
             # Synthesize correlation array at full sample resolution (shortened for mock)
             n = 4096  # representative length

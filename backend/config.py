@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 from typing import Literal
 
-from pydantic import Field
+from pydantic import ConfigDict, Field, model_validator
 from pydantic_settings import BaseSettings
 from pydantic import BaseModel
 
@@ -168,6 +168,48 @@ class CalibrationState(BaseModel):
     )
 
 
+class RigPose(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    x_cm: float = Field(default=0.0, ge=-200.0, le=200.0)
+    y_cm: float = Field(default=0.0, ge=-200.0, le=200.0)
+    z_cm: float = Field(default=0.0, ge=-200.0, le=200.0)
+
+
+class RigConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    camera: RigPose = Field(default_factory=RigPose)
+    speaker: RigPose = Field(default_factory=lambda: RigPose(x_cm=-15.0, y_cm=-10.0))
+    mic: RigPose = Field(default_factory=lambda: RigPose(x_cm=15.0, y_cm=-10.0))
+
+
+class DashboardConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    waveform: Literal["linear_fm_chirp", "log_chirp", "audible_ping", "ultrasonic_sweep"] = "linear_fm_chirp"
+    speaker_volume: float = Field(default=0.65, ge=0.0, le=1.0)
+    silent_mode: bool = False
+    ping_rate_hz: float = Field(default=10.0, ge=1.0, le=30.0)
+    scan_min_m: float = Field(default=0.35, ge=0.2, le=4.0)
+    scan_max_m: float = Field(default=2.5, ge=0.2, le=4.0)
+    fog_falloff_curve: Literal["linear", "exponential", "squared"] = "exponential"
+    color_mode: Literal["optical_rgb", "fog_gradient", "acoustic_heatmap", "custom_palette"] = "optical_rgb"
+    custom_near_hex: str = Field(default="#00F5D4", pattern=r"^#[0-9A-Fa-f]{6}$")
+    custom_far_hex: str = Field(default="#3A0CA3", pattern=r"^#[0-9A-Fa-f]{6}$")
+    point_radius_mm: float = Field(default=4.0, ge=0.5, le=20.0)
+    audio_input_device_id: int | None = None
+    audio_output_device_id: int | None = None
+    camera_device_index: int | None = None
+    rig: RigConfig = Field(default_factory=RigConfig)
+
+    @model_validator(mode="after")
+    def validate_scan_range(self) -> "DashboardConfig":
+        if self.scan_min_m >= self.scan_max_m:
+            raise ValueError("scan_min_m must be less than scan_max_m")
+        return self
+
+
 # ---------------------------------------------------------------------------
 # Module-level singletons (imported by other modules)
 # ---------------------------------------------------------------------------
@@ -176,6 +218,7 @@ settings = SonarSettings()
 
 # Shared mutable calibration state — updated by WebSocket / REST handlers
 calibration = CalibrationState()
+dashboard_config = DashboardConfig()
 
 
 def apply_calibration_update(data: dict) -> CalibrationState:
@@ -188,4 +231,27 @@ def apply_calibration_update(data: dict) -> CalibrationState:
     global calibration
     merged = {**calibration.model_dump(), **data}
     calibration = CalibrationState.model_validate(merged)
+    return calibration
+
+
+def apply_dashboard_config_update(data: dict) -> DashboardConfig:
+    """Merge and validate an operator-dashboard configuration patch."""
+    global dashboard_config
+    merged = dashboard_config.model_dump()
+    patch = dict(data)
+    if "rig" in patch:
+        rig_patch = dict(patch["rig"])
+        patch["rig"] = dict(merged["rig"])
+        for device, pose in rig_patch.items():
+            patch["rig"][device] = {**merged["rig"][device], **pose}
+    merged.update(patch)
+    dashboard_config = DashboardConfig.model_validate(merged)
+    return dashboard_config
+
+
+def get_dashboard_config() -> DashboardConfig:
+    return dashboard_config
+
+
+def get_calibration_state() -> CalibrationState:
     return calibration

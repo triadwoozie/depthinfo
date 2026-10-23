@@ -33,12 +33,20 @@ from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from blender_bridge import BlenderBridge
-from config import CalibrationState, apply_calibration_update, calibration, settings
+from config import (
+    apply_calibration_update,
+    apply_dashboard_config_update,
+    get_calibration_state,
+    get_dashboard_config,
+    settings,
+)
+from devices import enumerate_devices
+from pydantic import ValidationError
 from sonar_engine import SonarEngine
 from vision_engine import VisionEngine
 
@@ -204,15 +212,52 @@ async def ws_telemetry(websocket: WebSocket) -> None:
             try:
                 raw = await asyncio.wait_for(websocket.receive_text(), timeout=0.05)
                 data = json.loads(raw)
-                updated = apply_calibration_update(data)
-                # Echo back the full calibration state so client stays in sync
-                await websocket.send_text(
-                    json.dumps({"type": "calibration_ack", "calibration": updated.model_dump()})
-                )
+                if not isinstance(data, dict):
+                    await websocket.send_text(
+                        json.dumps(
+                            {
+                                "type": "config_error",
+                                "message": "WebSocket updates must be JSON objects",
+                            }
+                        )
+                    )
+                    continue
+                if data.get("type") == "operator_config_patch":
+                    updated_config = apply_dashboard_config_update(data.get("config", {}))
+                    await websocket.send_text(
+                        json.dumps(
+                            {
+                                "type": "operator_config_ack",
+                                "config": updated_config.model_dump(),
+                            }
+                        )
+                    )
+                else:
+                    updated = apply_calibration_update(data)
+                    await websocket.send_text(
+                        json.dumps(
+                            {
+                                "type": "calibration_ack",
+                                "calibration": updated.model_dump(),
+                            }
+                        )
+                    )
             except asyncio.TimeoutError:
                 pass  # No incoming message — continue
             except json.JSONDecodeError:
-                pass  # Ignore malformed messages
+                await websocket.send_text(
+                    json.dumps({"type": "config_error", "message": "Invalid JSON message"})
+                )
+            except ValidationError as exc:
+                await websocket.send_text(
+                    json.dumps(
+                        {
+                            "type": "config_error",
+                            "message": "Configuration validation failed",
+                            "details": exc.errors(include_context=False),
+                        }
+                    )
+                )
     except WebSocketDisconnect:
         pass
     finally:
@@ -260,7 +305,32 @@ async def video_feed() -> StreamingResponse:
 @app.get("/api/calibration")
 async def get_calibration() -> JSONResponse:
     """Return the current calibration state."""
-    return JSONResponse(content=calibration.model_dump())
+    return JSONResponse(content=get_calibration_state().model_dump())
+
+
+@app.get("/api/config")
+async def get_config() -> JSONResponse:
+    return JSONResponse(content=get_dashboard_config().model_dump())
+
+
+@app.patch("/api/config")
+async def patch_config(body: dict) -> JSONResponse:
+    try:
+        updated = apply_dashboard_config_update(body)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=exc.errors(include_context=False),
+        ) from exc
+    return JSONResponse(content=updated.model_dump())
+
+
+@app.get("/api/devices")
+async def get_devices() -> JSONResponse:
+    try:
+        return JSONResponse(content=enumerate_devices())
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @app.post("/api/calibration")
@@ -269,7 +339,13 @@ async def post_calibration(body: dict) -> JSONResponse:
     Merge a partial calibration dict into the current state.
     Returns the full updated state.
     """
-    updated = apply_calibration_update(body)
+    try:
+        updated = apply_calibration_update(body)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=exc.errors(include_context=False),
+        ) from exc
     return JSONResponse(content=updated.model_dump())
 
 

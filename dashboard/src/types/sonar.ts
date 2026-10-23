@@ -118,6 +118,60 @@ export interface CalibrationState {
   autopilot_timeout_sec: number
 }
 
+export type WaveformType =
+  | "linear_fm_chirp"
+  | "log_chirp"
+  | "audible_ping"
+  | "ultrasonic_sweep"
+
+export type ColorMode =
+  | "optical_rgb"
+  | "fog_gradient"
+  | "acoustic_heatmap"
+  | "custom_palette"
+
+export type FogFalloff = "linear" | "exponential" | "squared"
+
+export interface RigPose {
+  x_cm: number
+  y_cm: number
+  z_cm: number
+}
+
+export interface OperatorConfig {
+  waveform: WaveformType
+  speaker_volume: number
+  silent_mode: boolean
+  ping_rate_hz: number
+  scan_min_m: number
+  scan_max_m: number
+  fog_falloff_curve: FogFalloff
+  color_mode: ColorMode
+  custom_near_hex: string
+  custom_far_hex: string
+  point_radius_mm: number
+  audio_input_device_id: number | null
+  audio_output_device_id: number | null
+  camera_device_index: number | null
+  rig: {
+    camera: RigPose
+    speaker: RigPose
+    mic: RigPose
+  }
+}
+
+export interface DeviceInfo {
+  id: number
+  name: string
+  channels?: number
+}
+
+export interface DeviceList {
+  audio_inputs: DeviceInfo[]
+  audio_outputs: DeviceInfo[]
+  cameras: DeviceInfo[]
+}
+
 // ---------------------------------------------------------------------------
 // WebSocket message union (for type-narrowing in useSonarSocket)
 // ---------------------------------------------------------------------------
@@ -126,6 +180,8 @@ export interface CalibrationState {
 export type WsIncomingMessage =
   | SonarTelemetry
   | { type: "calibration_ack"; calibration: CalibrationState }
+  | { type: "operator_config_ack"; config: OperatorConfig }
+  | { type: "config_error"; message: string; details?: unknown[] }
 
 // ---------------------------------------------------------------------------
 // UI helpers
@@ -179,4 +235,26 @@ export const DEFAULT_CALIBRATION: CalibrationState = {
   depth_zero_offset_cm: 0.0,
   smoothing_alpha: 0.25,
   autopilot_timeout_sec: 10,
+}
+
+export const DEFAULT_OPERATOR_CONFIG: OperatorConfig = {
+  waveform: "linear_fm_chirp",
+  speaker_volume: 0.65,
+  silent_mode: false,
+  ping_rate_hz: 10,
+  scan_min_m: 0.35,
+  scan_max_m: 2.5,
+  fog_falloff_curve: "exponential",
+  color_mode: "optical_rgb",
+  custom_near_hex: "#00F5D4",
+  custom_far_hex: "#3A0CA3",
+  point_radius_mm: 4,
+  audio_input_device_id: null,
+  audio_output_device_id: null,
+  camera_device_index: null,
+  rig: {
+    camera: { x_cm: 0, y_cm: 0, z_cm: 0 },
+    speaker: { x_cm: -15, y_cm: -10, z_cm: 0 },
+    mic: { x_cm: 15, y_cm: -10, z_cm: 0 },
+  },
 }

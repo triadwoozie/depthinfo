@@ -24,6 +24,7 @@
     --input: 0 0% 14.9%;
     --ring: 160 84% 39%;
     --radius: 0.5rem;
+    color-scheme: dark;
   }
 }
 
@@ -34,7 +35,33 @@
   body {
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
+    background-image: radial-gradient(ellipse at 50% -20%, rgba(16, 185, 129, 0.08), transparent 42%);
+    min-height: 100vh;
   }
+}
+
+.instrument-card {
+  @apply rounded-xl border border-zinc-800/60 bg-zinc-900/50 shadow-[0_12px_40px_rgba(0,0,0,0.12)] backdrop-blur-sm;
+}
+
+.instrument-title {
+  @apply text-xs font-semibold uppercase tracking-[0.12em] text-zinc-200;
+}
+
+.instrument-kicker {
+  @apply mt-1 text-[9px] uppercase tracking-wider text-zinc-500;
+}
+
+.instrument-label {
+  @apply text-[9px] font-medium uppercase tracking-wider text-zinc-400;
+}
+
+.instrument-badge {
+  @apply h-7 rounded-lg border-zinc-700/80 bg-zinc-950/50 px-2.5 font-mono text-[9px] tracking-wider text-zinc-400;
+}
+
+.icon-tile {
+  @apply grid h-9 w-9 place-items-center rounded-lg border border-zinc-700/60 bg-zinc-950/60;
 }
 
 /* Scrollbar styling for dark instrument aesthetic */
@@ -50,4 +77,13 @@
 }
 ::-webkit-scrollbar-thumb:hover {
   @apply bg-zinc-600;
+}
+
+input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+input[type="color"]::-webkit-color-swatch {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 5px;
 }
