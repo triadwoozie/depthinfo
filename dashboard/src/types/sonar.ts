@@ -26,7 +26,7 @@ export interface SonarTelemetry {
    * - "mock-idle"  — synthetic data with no simulated peak above threshold
    * - "initialising" — engine not yet ready
    */
-  status: "tracking" | "idle" | "autopilot" | "mock" | "mock-idle" | "initialising"
+  status: "tracking" | "idle" | "autopilot" | "mock" | "mock-idle" | "initialising" | "error"
 
   /** Whether the backend is running in mock mode (no hardware). */
   mock_mode: boolean
@@ -246,6 +246,7 @@ export function statusToVariant(
       return "outline"
     case "autopilot":
     case "initialising":
+    case "error":
       return "destructive"
     default:
       return "outline"

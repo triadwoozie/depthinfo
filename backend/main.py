@@ -166,7 +166,7 @@ app.mount("/exports", StaticFiles(directory=settings.exports_path), name="export
 @app.get("/api/devices")
 async def api_devices() -> JSONResponse:
     # PortAudio / OpenCV probing blocks (camera open can take seconds) — keep it off the loop.
-    return JSONResponse(await asyncio.get_running_loop().run_in_executor(None, list_devices))
+    return JSONResponse(await asyncio.get_running_loop().run_in_executor(None, list_devices, vision.active_camera))
 
 
 @app.get("/api/config")
@@ -237,7 +237,9 @@ async def calibration_round(n: int, request: Request) -> JSONResponse:
             await _patch_config({"calibration": {"background_fog_captured": True, **_mark_round(3)}})
             return JSONResponse({"status": "ok", "frames": 30, "bg_shape": list(bg.shape)})
         return await _round_4(request)
-    except (RuntimeError, ValidationError) as exc:
+    except HTTPException:
+        raise
+    except Exception as exc:  # audio/camera failures (e.g. PortAudioError) must not become bare 500s
         return JSONResponse(status_code=503, content={"status": "error", "detail": str(exc)})
 
 
@@ -395,6 +397,7 @@ async def healthz() -> JSONResponse:
         "mock": sonar.mock,
         "ws_clients": manager.active_count,
         "sonar_status": sonar.latest_reading.status,
+        "sonar_error": sonar.last_error,  # last audio I/O failure, cleared on the next good ping
         "vision_fps": round(vision.fps, 1),
         "depth_backend": vision.depth_backend,
         "camera_mock": vision.camera_mock,

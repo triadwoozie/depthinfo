@@ -32,6 +32,8 @@
 
 ## Quick Start
 
+> Step-by-step setup, real-hardware notes, troubleshooting and a real-world test log: **[`GETTING_STARTED.md`](GETTING_STARTED.md)**.
+
 ### 1. Backend
 
 ```bash

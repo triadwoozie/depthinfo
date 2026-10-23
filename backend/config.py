@@ -94,8 +94,9 @@ class Microphone(_Model):
 
 
 class HardwareConfig(_Model):
-    input_audio_device_id: int | None = 1
-    output_audio_device_id: int | None = 2
+    # None = the system default device. (Ids are machine-specific, so there is no portable number.)
+    input_audio_device_id: int | None = None
+    output_audio_device_id: int | None = None
     camera_device_index: int = 0
     sample_rate_hz: int = Field(default=48000, ge=8000, le=192000)
     camera_fov_deg: float = Field(default=65.0, gt=10.0, lt=170.0)

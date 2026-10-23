@@ -83,9 +83,17 @@ def enumerate_cameras(max_index: int = 10) -> tuple[list[dict[str, Any]], bool]:
     return (found, False) if found else (_mock_cameras(), True)
 
 
-def list_devices() -> dict[str, Any]:
+def list_devices(active_camera: int | None = None) -> dict[str, Any]:
+    """``active_camera``: index of a camera already held open by the vision pipeline. A busy
+    camera cannot be re-opened for probing, so without this it would be reported as missing."""
     audio, audio_mock = enumerate_audio()
     cameras, cam_mock = enumerate_cameras()
+    if active_camera is not None and not any(c["index"] == active_camera and not c.get("mock") for c in cameras):
+        cameras = [c for c in cameras if not c.get("mock") and c["index"] != active_camera]
+        cameras.append({"index": active_camera, "name": f"Camera {active_camera} (in use)",
+                        "width": 640, "height": 480, "mock": False})
+        cameras.sort(key=lambda c: c["index"])
+        cam_mock = False
     return {
         "mock": settings.mock_mode or audio_mock or cam_mock,
         "audio_mock": audio_mock,

@@ -41,6 +41,9 @@ CURVE_BINS = 256
 CURVE_RANGE_M = 4.0
 MAX_RANGE_M = 4.5  # recording window covers echoes out to this one-way range
 BLANK_MARGIN_M = 0.15  # Round 1 safety margin
+# A real echo must stand this many times above the median correlation in the search window.
+# Pure noise peaks at only ~3-4x its median, so without this a silent channel "tracks" noise.
+PEAK_TO_MEDIAN_MIN = 6.0
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +80,17 @@ def synthesize_waveform(ac: AcousticsConfig, fs: int) -> np.ndarray:
 
     x = ac.speaker_volume * np.hanning(n) * np.sin(phase)
     return np.tanh(x).astype(np.float32)
+
+
+def open_channels(device, kind: str, needed: int) -> int:
+    """Channel count to open ``device`` with. ALSA ``hw:`` devices only accept their native
+    count (e.g. 2 for a laptop codec), whereas virtual devices (PipeWire, 128 channels) accept
+    any small count, so they are not opened at their full width."""
+    try:
+        native = int(sd.query_devices(device, kind)[f"max_{kind}_channels"])
+    except Exception:
+        return needed
+    return needed if native > 8 else max(needed, native)
 
 
 # ---------------------------------------------------------------------------
@@ -139,7 +153,10 @@ def analyse_correlation(
 
     k_peak = int(np.argmax(search))
     amp = float(search[k_peak])
-    if amp < cal.detection_threshold or corr[k_peak] < abs_gate:
+    window = search[k_blank + 1 : k_max + 1]
+    floor = float(np.median(window)) if window.size else 0.0
+    if (amp < cal.detection_threshold or corr[k_peak] < abs_gate
+            or amp < PEAK_TO_MEDIAN_MIN * max(floor, 1e-9)):
         return Analysis(None, amp, curve.tolist())
 
     L = k_peak / fs * v
@@ -227,13 +244,27 @@ class SonarDSP:
                         self._mock_correlation(cfg, fs) if self.mock else self._record(cfg, fs)
                     )
                 self._publish(analyse_correlation(corr, cfg, fs, abs_gate), cfg)
+                self.last_error = None
             except Exception as exc:
+                if str(exc) != self.last_error:  # log once per distinct failure, not every retry
+                    print(f"[SonarDSP] I/O error: {exc}. Retrying every second.")
                 self.last_error = str(exc)
-                print(f"[SonarDSP] I/O error: {exc}. Retrying in 1 s.")
+                self._publish_error()
                 time.sleep(1.0)
                 continue
             period = 1.0 / cfg.acoustics.ping_rate_hz
             time.sleep(max(0.0, period - (time.monotonic() - t0)))
+
+    def _publish_error(self) -> None:
+        """Surface a failing audio device in telemetry instead of freezing on the last reading."""
+        reading = SonarReading(
+            timestamp=time.time(),
+            sonar_depth_m=round(float(self._ema or 0.0), 4),
+            peak_amplitude=0.0,
+            status="error",
+        )
+        with self._lock:
+            self._latest = reading
 
     def _publish(self, an: Analysis, cfg: SystemConfig) -> None:
         cal = cfg.calibration
@@ -265,10 +296,12 @@ class SonarDSP:
 
     def _play_record(self, cfg: SystemConfig, fs: int, tx: np.ndarray, n_samples: int) -> np.ndarray:
         """Full-duplex playback of ``tx`` (zero-padded) while recording the mic channel."""
-        out = np.zeros((n_samples, 1), dtype=np.float32)
-        out[: min(len(tx), n_samples), 0] = tx[:n_samples]
+        in_id, out_id = cfg.hardware.input_audio_device_id, cfg.hardware.output_audio_device_id
+        n_out = open_channels(out_id, "output", 1)
+        out = np.zeros((n_samples, n_out), dtype=np.float32)
+        out[: min(len(tx), n_samples), :] = tx[:n_samples, None]  # same probe on every speaker channel
         mic = cfg.hardware.microphones[0]
-        n_in = mic.channel + 1
+        n_in = open_channels(in_id, "input", mic.channel + 1)
         rec = sd.playrec(
             out,
             samplerate=fs,
@@ -364,7 +397,8 @@ class SonarDSP:
             else:
                 mic = cfg.hardware.microphones[0]
                 rec = sd.rec(
-                    int(seconds * fs), samplerate=fs, channels=mic.channel + 1,
+                    int(seconds * fs), samplerate=fs,
+                    channels=open_channels(cfg.hardware.input_audio_device_id, "input", mic.channel + 1),
                     dtype="float32", device=cfg.hardware.input_audio_device_id,
                 )
                 sd.wait()
@@ -373,8 +407,14 @@ class SonarDSP:
         rms = float(np.sqrt(np.mean(rec**2)))
         # RMS was measured after mic gain, so the stored floor is in post-gain units too.
         threshold = float(np.clip(3.0 * rms, 0.05, 0.5))
+        quality = "ok"
+        if rms > 0.2:
+            quality = "input_too_loud"  # real rooms sit well below this; wrong device or clipping
+        elif rms < 1e-5:
+            quality = "input_silent"  # muted or wrong input channel
         return {
             "ambient_noise_floor_rms": round(rms, 5),
             "detection_threshold": round(threshold, 4),
             "seconds": seconds,
+            "quality": quality,
         }

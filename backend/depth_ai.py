@@ -203,6 +203,10 @@ class VisionFrame:
     peak_amplitude: float
 
 
+def cfg_camera_index(cfg: SystemConfig) -> int:
+    return cfg.hardware.camera_device_index
+
+
 class VisionPipeline:
     def __init__(
         self,
@@ -222,6 +226,7 @@ class VisionPipeline:
         self.estimator: DepthEstimator | None = None
         self.bg_depth: np.ndarray | None = None
         self.camera_mock = True
+        self.active_camera: int | None = None  # index of the camera this pipeline holds open
         self.error: str | None = None
         if BG_MASK_PATH.exists():
             try:
@@ -319,6 +324,7 @@ class VisionPipeline:
             self.estimator = DepthEstimator()
             cap = self._open_camera(get_config())
             self.camera_mock = cap is None
+            self.active_camera = None if cap is None else cfg_camera_index(get_config())
             rng = np.random.default_rng(7)
             while self._running:
                 t0 = time.monotonic()
