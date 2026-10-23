@@ -68,7 +68,6 @@ function SliderRow({
         max={max}
         step={step}
         onValueChange={([v]) => onChange(v)}
-        className="[&>span]:bg-emerald-500 [&>span]:border-emerald-400"
       />
     </div>
   )
