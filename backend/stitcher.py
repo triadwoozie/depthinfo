@@ -73,6 +73,7 @@ class Stitcher:
         self._buffer: deque[tuple[np.ndarray, np.ndarray]] = deque(maxlen=5)
         self._last_ingest = 0.0
         self._prev_pcd: o3d.geometry.PointCloud | None = None
+        self._latest: tuple[np.ndarray, np.ndarray] | None = None  # newest single-frame cloud
         self._pcd: o3d.geometry.PointCloud | None = None
         self._last_mesh = 0.0
         self._V = np.zeros((0, 3), np.float32)
@@ -91,6 +92,8 @@ class Stitcher:
         t0 = time.perf_counter()
 
         pts, cols = self._unproject(vf, cfg)
+        with self._lock:
+            self._latest = (pts, cols) if len(pts) else None
         if len(pts) == 0:
             return
         if self._buffer.maxlen != cfg.vision_and_fog.temporal_stitch_frames:
@@ -224,9 +227,19 @@ class Stitcher:
         with self._lock:
             return len(self._V)
 
-    def sample(self, max_points: int) -> tuple[list[list[float]], list[list[float]]]:
-        """Uniform subsample for the UDP bridge, rounded to keep packets small."""
-        V, _, C = self.output_frame()
+    def sample(self, max_points: int, stitched: bool = False) -> tuple[list[list[float]], list[list[float]]]:
+        """Uniform subsample (rounded) for the UDP bridge and the dashboard preview.
+
+        By default this is the newest *single frame*: it keeps the true front-to-back relief of the
+        subject. ``stitched=True`` returns the temporally fused cloud, which smears if the subject
+        (and therefore Z_sonar) moves between the buffered frames.
+        """
+        if not stitched:
+            with self._lock:
+                latest = self._latest
+            V, C = latest if latest is not None else (np.zeros((0, 3), np.float32), np.zeros((0, 3), np.float32))
+        else:
+            V, _, C = self.output_frame()
         if len(V) == 0:
             return [], []
         idx = np.linspace(0, len(V) - 1, min(max_points, len(V))).astype(int)

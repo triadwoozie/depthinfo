@@ -24,6 +24,32 @@ Real-hardware mode additionally needs an audio interface able to play and record
 
 ---
 
+## Quick start: one command
+
+```bash
+./run.sh --setup --mock     # first run: creates the venv, installs npm packages, builds, starts
+./run.sh --mock             # afterwards
+```
+
+`./run.py` is the Python equivalent with identical flags. Both start the backend and the
+dashboard, wait until each answers, print the URLs, and **stop everything cleanly on Ctrl+C**
+(open video streams included). Logs are written to `logs/`.
+
+| Flag | Effect |
+|---|---|
+| `--mock` | Synthetic audio and video (no hardware) |
+| `--real-camera` | Use the real camera even with `--mock` (synthetic sonar, live video) |
+| `--model` | Download the neural depth model (99 MB) if missing |
+| `--dev` | Dashboard dev server with hot reload |
+| `--rebuild` | Force a production dashboard rebuild (it also rebuilds automatically when sources are newer) |
+| `--backend-only` | Do not start the dashboard |
+| `--open` | Open the dashboard in a browser |
+| `--setup` | Create `backend/.venv` and run `npm ci` if they are missing |
+
+The manual steps below do the same thing one piece at a time.
+
+---
+
 ## 2. Start the backend (port 8000)
 
 ```bash
@@ -82,6 +108,38 @@ curl -X PATCH localhost:8000/api/config -H 'Content-Type: application/json' \
      -d '{"vision_and_fog": {"max_scan_distance_m": 1.5}}'
 curl -X POST localhost:8000/api/export/blend
 ```
+
+### Depth modes and the point cloud
+
+*Spatial monitor ▸ Depth inference mode* (or `vision_and_fog.depth_inference_mode`):
+
+| Mode | What runs | Cost |
+|---|---|---|
+| **Disabled / Direct sonar** | Flat plane at the sonar distance | none |
+| **Fast heuristic** (default) | Edge, brightness and background-difference cues, bilateral-smoothed | about 1 ms |
+| **Neural ONNX** | Depth-Anything-V2-Small in a background thread | about 1.5 FPS of depth updates on CPU |
+
+All modes feed the same hybrid equation, with the sonar as the metric anchor:
+
+```
+Z(u,v) = Z_sonar + (D_rel(u,v) - D_anchor) * relief_depth_span_m
+```
+
+`D_rel` is 0 for near and 1 for far; `D_anchor` is its median inside the acoustic beam cone
+(`acoustic_beam_deg`, default 20°). Each pixel is then unprojected through the pinhole model and
+the camera pose, so the cloud has true front-to-back relief. If a mode cannot run (for example the
+model file is missing) the dashboard shows why and the **Running:** badge shows the mode that is
+really active. The 3D tab and the Blender stream show the newest single frame; the exported scene
+uses the fused (stitched) cloud. The camera is read in its own thread; if it cannot be opened or
+disconnects, the app logs a warning, shows *Camera unavailable: synthetic video* and keeps
+retrying every 5 s.
+
+### Calibration wizard
+
+**Calibrate** opens a guided wizard: a live microphone level meter, then Rounds 1 to 4
+(blanking, noise floor, empty background, metric anchor) with progress, pass/check/fail verdicts
+and a diagnostics log. Every step calls the real backend endpoints. The *Manual* tab keeps the
+sliders.
 
 ### Blender live viewport (optional)
 
@@ -236,6 +294,10 @@ headset, PipeWire audio.
 - *Echo strength* on the dashboard is normalised to the strongest return, so it can read 100%
   on noise; trust the status badge and the depth stability instead.
 - The mock backend sends 30 to 50 UDP packets per second rather than 60 on a loaded machine.
-- No automated test suite or CI yet; everything above was checked by hand.
-- The calibration wizard, draggable rig editor, multi-mic (GCC-PHAT) and autopilot UI from
-  `ROADMAP.md` phases 4 and 6 are not built yet.
+- There is no CI yet. The backend has unit tests (`cd backend && .venv/bin/python -m pytest tests`,
+  needs `requirements-dev.txt`) covering unprojection, camera pose, the hybrid equation, depth
+  modes and camera fallback; the rest was checked by hand.
+- The draggable rig editor, multi-mic (GCC-PHAT) and autopilot UI from `ROADMAP.md` phases 4
+  and 6 are not built yet. See "What's next" in `ROADMAP.md`.
+- The fast heuristic is a cue-based approximation, not true depth; use the neural mode (or a
+  calibrated empty background) when relief accuracy matters.

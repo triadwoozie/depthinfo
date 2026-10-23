@@ -59,6 +59,18 @@ export interface SonarTelemetry {
   /** Measured telemetry broadcast rate (Hz). */
   system_fps?: number
 
+  /** Depth mode requested in the config. */
+  depth_mode?: DepthMode
+
+  /** Depth mode actually running (differs from `depth_mode` when a fallback is active). */
+  depth_mode_active?: DepthMode
+
+  /** Why the requested depth mode cannot run, if it cannot. */
+  depth_error?: string | null
+
+  /** Video source: real camera, mock frames, or mock frames because the camera failed. */
+  camera_source?: "camera" | "mock" | "mock-fallback"
+
   /**
    * Cross-correlation curve — exactly 256 normalised floats [0.0–1.0].
    * Index 0 corresponds to 0.0 m; index 255 corresponds to 4.0 m.
@@ -144,6 +156,9 @@ export type ColorMode =
 
 export type FogFalloff = "linear" | "exponential" | "squared"
 
+/** How relative depth is inferred around the sonar anchor (backend: vision_and_fog.depth_inference_mode). */
+export type DepthMode = "disabled" | "lightweight_fast" | "neural_onnx"
+
 export interface RigPose {
   x_cm: number
   y_cm: number
@@ -158,6 +173,7 @@ export interface OperatorConfig {
   scan_min_m: number
   scan_max_m: number
   fog_falloff_curve: FogFalloff
+  depth_inference_mode: DepthMode
   color_mode: ColorMode
   custom_near_hex: string
   custom_far_hex: string
@@ -274,6 +290,7 @@ export const DEFAULT_OPERATOR_CONFIG: OperatorConfig = {
   scan_min_m: 0.35,
   scan_max_m: 2.5,
   fog_falloff_curve: "exponential",
+  depth_inference_mode: "lightweight_fast",
   color_mode: "optical_rgb",
   custom_near_hex: "#00F5D4",
   custom_far_hex: "#3A0CA3",
@@ -340,6 +357,8 @@ export interface SystemConfig {
     min_scan_distance_m: number
     max_scan_distance_m: number
     fog_falloff_curve: FogFalloff
+    depth_inference_mode: DepthMode
+    acoustic_beam_deg: number
     fog_density: number
     fog_colormap: string
     relief_depth_span_m: number
@@ -386,6 +405,7 @@ export function systemToOperator(sys: SystemConfig, lastVolume: number): Operato
     scan_min_m: sys.vision_and_fog.min_scan_distance_m,
     scan_max_m: sys.vision_and_fog.max_scan_distance_m,
     fog_falloff_curve: sys.vision_and_fog.fog_falloff_curve,
+    depth_inference_mode: sys.vision_and_fog.depth_inference_mode,
     color_mode: sys.blender_style.color_mode,
     custom_near_hex: sys.blender_style.custom_near_hex.toUpperCase(),
     custom_far_hex: sys.blender_style.custom_far_hex.toUpperCase(),
@@ -442,6 +462,10 @@ export function operatorPatchToSystem(
   if (patch.scan_max_m !== undefined) set("vision_and_fog", { max_scan_distance_m: patch.scan_max_m })
   if (patch.fog_falloff_curve !== undefined) {
     set("vision_and_fog", { fog_falloff_curve: patch.fog_falloff_curve })
+  }
+
+  if (patch.depth_inference_mode !== undefined) {
+    set("vision_and_fog", { depth_inference_mode: patch.depth_inference_mode })
   }
 
   if (patch.color_mode !== undefined) set("blender_style", { color_mode: patch.color_mode })

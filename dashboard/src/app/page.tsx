@@ -4,6 +4,7 @@ import { useState } from "react"
 import { Activity, AudioLines, Box, Crosshair, Radio } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Card,
   CardContent,
@@ -20,6 +21,7 @@ import {
 } from "@/components/ui/dialog"
 import { AcousticSynthPanel } from "@/components/sonar/AcousticSynthPanel"
 import { CalibrationPanel } from "@/components/sonar/CalibrationPanel"
+import { CalibrationWizard } from "@/components/sonar/CalibrationWizard"
 import { CorrelationCanvas } from "@/components/sonar/CorrelationCanvas"
 import { ExportDrawer } from "@/components/sonar/ExportDrawer"
 import { RigCanvas } from "@/components/sonar/RigCanvas"
@@ -101,7 +103,11 @@ export default function SonarDashboard() {
           </aside>
 
           <section className="min-w-0 xl:h-full xl:overflow-y-auto">
-            <VisionPreview config={operatorConfig} onConfigChange={updateOperatorConfig} />
+            <VisionPreview
+              telemetry={telemetry}
+              config={operatorConfig}
+              onConfigChange={updateOperatorConfig}
+            />
           </section>
 
           <section className="flex min-w-0 flex-col gap-4 xl:h-full xl:overflow-hidden">
@@ -161,14 +167,25 @@ export default function SonarDashboard() {
       </main>
 
       <Dialog open={calibrationOpen} onOpenChange={setCalibrationOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Calibration</DialogTitle>
             <DialogDescription>
-              Adjust chirp timing, direct-path blanking, echo threshold and depth smoothing.
+              Run the guided microphone and sonar calibration, or tune the parameters by hand.
             </DialogDescription>
           </DialogHeader>
-          <CalibrationPanel calibration={calibration} onChange={updateCalibration} />
+          <Tabs defaultValue="wizard">
+            <TabsList>
+              <TabsTrigger value="wizard">Guided wizard</TabsTrigger>
+              <TabsTrigger value="manual">Manual</TabsTrigger>
+            </TabsList>
+            <TabsContent value="wizard" className="mt-4">
+              <CalibrationWizard active={calibrationOpen} />
+            </TabsContent>
+            <TabsContent value="manual" className="mt-4">
+              <CalibrationPanel calibration={calibration} onChange={updateCalibration} />
+            </TabsContent>
+          </Tabs>
         </DialogContent>
       </Dialog>
     </div>

@@ -228,6 +228,8 @@ Intersect DoA cones with sonar range sphere $Z_{\text{sonar}}$ to obtain directi
     "fog_density": 1.2,
     "fog_colormap": "mist_grayscale",
     "relief_depth_span_m": 0.45,
+    "depth_inference_mode": "lightweight_fast",
+    "acoustic_beam_deg": 20.0,
     "temporal_stitch_frames": 5,
     "voxel_downsample_m": 0.01
   },
@@ -370,5 +372,7 @@ Applied in both `stitcher.py` (live) and `export_static_scene.py` (baked):
 | `SONAR_UDP_HZ` | `60` | Blender update rate |
 | `SONAR_WS_HZ` | `20` | Dashboard telemetry rate |
 | `SONAR_CAMERA_INDEX` | `0` | OpenCV camera index |
+| `SONAR_REAL_CAMERA` | `false` | Use the real camera even when `SONAR_MOCK_MODE=true` |
+| `DEPTH_AUTO_DOWNLOAD` | `false` | Fetch the ONNX depth model on first use of `neural_onnx` |
 | `DEPTH_MODEL_PATH` | `models/depth_anything_v2_vits.onnx` | ONNX model file path |
 | `EXPORTS_DIR` | `backend/exports` | Static `.blend` / `.glb` / `.ply` output |

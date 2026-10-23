@@ -345,6 +345,45 @@ class SonarDSP:
         corr += 0.7 * np.exp(-((k - k_echo) ** 2) / (2 * 6.0**2))
         return corr, 0.0
 
+    def measure_input_level(self, seconds: float = 0.3) -> dict:
+        """Record ``seconds`` from the microphone (no emission) and report its level.
+
+        Pauses the ping loop for the duration (it shares the audio device). Values are in the same
+        post-gain units as Round 2. ``quality`` is ``ok | silent | too_loud | clipping``.
+        """
+        cfg = get_config()
+        fs = cfg.hardware.sample_rate_hz
+        n = int(seconds * fs)
+        with self._io_lock:
+            if self.mock:
+                rec = self._rng.normal(0.0, 0.02, n)
+            else:
+                mic = cfg.hardware.microphones[0]
+                raw = sd.rec(
+                    n, samplerate=fs,
+                    channels=open_channels(cfg.hardware.input_audio_device_id, "input", mic.channel + 1),
+                    dtype="float32", device=cfg.hardware.input_audio_device_id,
+                )
+                sd.wait()
+                rec = raw[:, mic.channel].astype(np.float64)
+        rec = rec * 10 ** (cfg.acoustics.mic_gain_db / 20.0)
+        rms = float(np.sqrt(np.mean(rec**2)))
+        peak = float(np.max(np.abs(rec)))
+        quality = "ok"
+        if peak >= 0.99:
+            quality = "clipping"
+        elif rms > 0.2:
+            quality = "too_loud"
+        elif rms < 1e-5:
+            quality = "silent"
+        return {
+            "rms": round(rms, 5),
+            "peak": round(peak, 5),
+            "dbfs": round(20.0 * math.log10(max(rms, 1e-9)), 1),
+            "quality": quality,
+            "mock": self.mock,
+        }
+
     # -- calibration rounds -----------------------------------------------
 
     def calibrate_round_1(self, n_chirps: int = 10) -> dict:
