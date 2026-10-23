@@ -1,9 +1,16 @@
 "use client"
 
 import { memo, useEffect, useState } from "react"
-import { Camera, ChevronDown, Mic2, Radio, ScanLine } from "lucide-react"
+import { Camera, Mic2, Radio } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
@@ -69,24 +76,18 @@ function RigCanvasView({ config, onConfigChange }: RigCanvasProps) {
   }
 
   return (
-    <Card className="instrument-card">
-      <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
-        <div className="flex items-center gap-2.5">
-          <div className="icon-tile text-emerald-300">
-            <ScanLine className="h-4 w-4" />
-          </div>
-          <div>
-            <CardTitle className="instrument-title">Hardware &amp; rig</CardTitle>
-            <p className="instrument-kicker">Device routing · top view</p>
-          </div>
+    <Card>
+      <CardHeader className="flex-row items-start justify-between space-y-0">
+        <div className="space-y-1.5">
+          <CardTitle>Hardware and rig</CardTitle>
+          <CardDescription>Device routing and sensor positions, top view</CardDescription>
         </div>
-        <Badge variant="outline" className="instrument-badge">
-          <span className="mr-1.5 h-1.5 w-1.5 rounded-full bg-emerald-400" />
-          RIG CONFIG
+        <Badge variant="outline" className="font-normal">
+          Rig
         </Badge>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="relative mx-auto flex aspect-square max-h-[260px] w-full items-center justify-center overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/60">
+        <div className="relative mx-auto flex aspect-square max-h-[260px] w-full items-center justify-center overflow-hidden rounded-md border bg-muted/20">
           <svg
             width="100%"
             height="100%"
@@ -147,23 +148,23 @@ function RigCanvasView({ config, onConfigChange }: RigCanvasProps) {
           </svg>
         </div>
 
-        <div className="grid min-w-0 gap-2.5">
+        <div className="grid min-w-0 gap-3">
           <DeviceSelect
-            icon={<Mic2 className="h-3.5 w-3.5 text-emerald-300" />}
+            icon={<Mic2 className="h-4 w-4" />}
             label="Studio microphone"
             selectedId={config.audio_input_device_id}
             devices={devices.audio_inputs}
             onChange={(audio_input_device_id) => onConfigChange({ audio_input_device_id })}
           />
           <DeviceSelect
-            icon={<Radio className="h-3.5 w-3.5 text-amber-300" />}
+            icon={<Radio className="h-4 w-4" />}
             label="Sonar speaker"
             selectedId={config.audio_output_device_id}
             devices={devices.audio_outputs}
             onChange={(audio_output_device_id) => onConfigChange({ audio_output_device_id })}
           />
           <DeviceSelect
-            icon={<Camera className="h-3.5 w-3.5 text-cyan-300" />}
+            icon={<Camera className="h-4 w-4" />}
             label="Optical camera"
             selectedId={config.camera_device_index}
             devices={devices.cameras}
@@ -171,53 +172,41 @@ function RigCanvasView({ config, onConfigChange }: RigCanvasProps) {
           />
         </div>
 
-        {deviceError && (
-          <p className="rounded-lg border border-amber-500/15 bg-amber-500/[0.05] px-3 py-2 text-[10px] text-amber-300/80">
-            {deviceError}
-          </p>
-        )}
+        {deviceError && <p className="text-xs text-destructive">{deviceError}</p>}
 
-        <details className="group rounded-xl border border-zinc-800/70 bg-zinc-950/40">
-          <summary className="flex cursor-pointer list-none items-center justify-between px-3 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400 marker:hidden">
-            Fine tune sensor positions
-            <ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" />
-          </summary>
-          <div className="space-y-4 border-t border-zinc-800/70 px-3 py-3">
-            {(["camera", "speaker", "mic"] as const).map((device) => (
-              <div key={device} className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-                    {device}
-                  </span>
-                  <span className="font-mono text-[9px] text-zinc-600">
-                    {deviceAxes
-                      .map((axis) => config.rig[device][axis].toFixed(0))
-                      .join(" / ")}{" "}
-                    cm
-                  </span>
-                </div>
-                {deviceAxes.map((axis) => (
-                  <div key={axis} className="grid grid-cols-[16px_1fr_36px] items-center gap-2">
-                    <span className="font-mono text-[9px] uppercase text-zinc-600">
-                      {axis[0]}
-                    </span>
-                    <Slider
-                      aria-label={`${device} ${axis}`}
-                      value={[config.rig[device][axis]]}
-                      min={-100}
-                      max={100}
-                      step={1}
-                      onValueChange={([value]) => updatePose(device, axis, value)}
-                    />
-                    <span className="text-right font-mono text-[9px] tabular-nums text-zinc-400">
-                      {config.rig[device][axis]}
+        <Accordion type="single" collapsible className="rounded-md border px-3">
+          <AccordionItem value="positions" className="border-b-0">
+            <AccordionTrigger className="py-3 text-sm">Fine-tune sensor positions</AccordionTrigger>
+            <AccordionContent className="space-y-4">
+              {(["camera", "speaker", "mic"] as const).map((device) => (
+                <div key={device} className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-sm capitalize">{device}</Label>
+                    <span className="text-xs tabular-nums text-muted-foreground">
+                      {deviceAxes.map((axis) => config.rig[device][axis].toFixed(0)).join(" / ")} cm
                     </span>
                   </div>
-                ))}
-              </div>
-            ))}
-          </div>
-        </details>
+                  {deviceAxes.map((axis) => (
+                    <div key={axis} className="grid grid-cols-[16px_1fr_36px] items-center gap-2">
+                      <span className="text-xs uppercase text-muted-foreground">{axis[0]}</span>
+                      <Slider
+                        aria-label={`${device} ${axis}`}
+                        value={[config.rig[device][axis]]}
+                        min={-100}
+                        max={100}
+                        step={1}
+                        onValueChange={([value]) => updatePose(device, axis, value)}
+                      />
+                      <span className="text-right text-xs tabular-nums text-muted-foreground">
+                        {config.rig[device][axis]}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </AccordionContent>
+          </AccordionItem>
+        </Accordion>
       </CardContent>
     </Card>
   )
@@ -237,16 +226,18 @@ function DeviceSelect({
   onChange: (value: number | null) => void
 }) {
   return (
-    <div className="flex min-w-0 items-center gap-2.5 overflow-hidden rounded-lg border border-zinc-800/70 bg-zinc-950/50 px-2.5">
-      {icon}
-      <span className="w-[116px] shrink-0 text-[10px] text-zinc-500">{label}</span>
+    <div className="grid min-w-0 gap-1.5">
+      <Label className="flex items-center gap-2 text-sm text-muted-foreground">
+        {icon}
+        {label}
+      </Label>
       <Select
         value={selectedId === null ? "default" : String(selectedId)}
         onValueChange={(value) =>
           onChange(value === "default" ? null : Number(value))
         }
       >
-        <SelectTrigger className="h-8 min-w-0 flex-1 overflow-hidden border-0 bg-transparent px-1 text-[10px] text-zinc-300 shadow-none focus:ring-0">
+        <SelectTrigger className="w-full">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>

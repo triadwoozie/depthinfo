@@ -2,27 +2,28 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Stock shadcn/ui "zinc" theme, dark. */
 @layer base {
   :root {
-    --background: 0 0% 3.9%;
+    --background: 240 10% 3.9%;
     --foreground: 0 0% 98%;
-    --card: 0 0% 7%;
+    --card: 240 10% 3.9%;
     --card-foreground: 0 0% 98%;
-    --popover: 0 0% 3.9%;
+    --popover: 240 10% 3.9%;
     --popover-foreground: 0 0% 98%;
-    --primary: 160 84% 39%;
-    --primary-foreground: 160 84% 98%;
-    --secondary: 0 0% 14.9%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 240 5.9% 10%;
+    --secondary: 240 3.7% 15.9%;
     --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 14.9%;
-    --muted-foreground: 0 0% 63.9%;
-    --accent: 160 84% 39%;
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+    --accent: 240 3.7% 15.9%;
     --accent-foreground: 0 0% 98%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 14.9%;
-    --input: 0 0% 14.9%;
-    --ring: 160 84% 39%;
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 240 4.9% 83.9%;
     --radius: 0.5rem;
     color-scheme: dark;
   }
@@ -35,48 +36,8 @@
   body {
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
-    background-image: radial-gradient(ellipse at 50% -20%, rgba(16, 185, 129, 0.08), transparent 42%);
     min-height: 100vh;
   }
-}
-
-.instrument-card {
-  @apply rounded-xl border border-zinc-800/60 bg-zinc-900/50 shadow-[0_12px_40px_rgba(0,0,0,0.12)] backdrop-blur-sm;
-}
-
-.instrument-title {
-  @apply text-xs font-semibold uppercase tracking-[0.12em] text-zinc-200;
-}
-
-.instrument-kicker {
-  @apply mt-1 text-[9px] uppercase tracking-wider text-zinc-500;
-}
-
-.instrument-label {
-  @apply text-[9px] font-medium uppercase tracking-wider text-zinc-400;
-}
-
-.instrument-badge {
-  @apply h-7 rounded-lg border-zinc-700/80 bg-zinc-950/50 px-2.5 font-mono text-[9px] tracking-wider text-zinc-400;
-}
-
-.icon-tile {
-  @apply grid h-9 w-9 place-items-center rounded-lg border border-zinc-700/60 bg-zinc-950/60;
-}
-
-/* Scrollbar styling for dark instrument aesthetic */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  @apply bg-zinc-950;
-}
-::-webkit-scrollbar-thumb {
-  @apply bg-zinc-700 rounded-full;
-}
-::-webkit-scrollbar-thumb:hover {
-  @apply bg-zinc-600;
 }
 
 input[type="color"]::-webkit-color-swatch-wrapper {
@@ -84,6 +45,6 @@ input[type="color"]::-webkit-color-swatch-wrapper {
 }
 
 input[type="color"]::-webkit-color-swatch {
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 5px;
+  border: 0;
+  border-radius: 4px;
 }
