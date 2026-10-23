@@ -4,7 +4,7 @@ build_template.py — generates blender/template_exhibition.blend (Blender 4.2+ 
     blender --background --factory-startup --python blender/build_template.py
 
 Contents: empty ``SonarPointCloud`` mesh (with a ``Col`` attribute and a point-instancing
-Geometry Nodes modifier, driven live by live_receiver.py), ``SonarTarget`` empty,
+Geometry Nodes modifier, driven live by the sonar_imaging extension), ``SonarTarget`` empty,
 ``SonarPing`` ring, ``ExhibitionFloor``, a 3-point light rig and ``StudioCamera``.
 export_static_scene.py reuses these by name.
 """
@@ -51,7 +51,7 @@ target.empty_display_type = "SPHERE"
 target.empty_display_size = 0.1
 link(target)
 
-# Ping ring (circle outline, scaled by live_receiver on each ping).
+# Ping ring (circle outline, scaled by the sonar_imaging extension on each ping).
 ring_mesh = bpy.data.meshes.new("SonarPing")
 bm = bmesh.new()
 bmesh.ops.create_circle(bm, cap_ends=False, radius=1.0, segments=96)

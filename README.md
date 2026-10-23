@@ -53,9 +53,19 @@ npm run dev                  # → http://localhost:3000
 
 ### 3. Blender Live Viewport (optional)
 
-1. Open **Blender 4.x** → Scripting workspace
-2. Open `blender/live_receiver.py` → click **▶ Run Script**
-3. UDP listener starts at `127.0.0.1:5005` — the point cloud updates at 60 FPS
+The receiver is a Blender 4.2+ / 5 **extension** in `blender/sonar_imaging/`.
+
+```bash
+blender --command extension build --source-dir blender/sonar_imaging --output-dir .
+# → sonar_imaging_receiver-1.0.0.zip
+```
+
+1. In Blender: **Edit ▸ Preferences ▸ Get Extensions ▸ ⌄ ▸ Install from Disk…** and pick the zip
+2. In the 3D Viewport press **N** → **Sonar Imaging** tab
+3. **Create Sonar Cloud Mesh**, then **Start Receiver** (UDP `127.0.0.1:5005`, matches the backend)
+
+The panel also controls point size, wave ripple / ping flash and the colour override.
+The backend sends `ping_pulse = 1` once per fresh chirp echo, which drives the flash.
 
 ---
 

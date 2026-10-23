@@ -36,7 +36,7 @@ sonar-imaging/
 │           └── schema.ts               # Strict TypeScript mirror of backend/config.py
 └── blender/                            # Blender 4.x Python Scripts & Template Assets
     ├── template_exhibition.blend       # Base scene with Geometry Nodes & exhibition lighting
-    ├── live_receiver.py                # Non-blocking bpy.app.timers UDP listener
+    ├── sonar_imaging/                  # Blender 4.2+/5 extension: UDP receiver + N-panel (blender_manifest.toml)
     └── export_static_scene.py          # Headless script that builds & saves static .blend models
 ```
 
@@ -57,7 +57,7 @@ sonar-imaging/
 - The main `asyncio` loop handles only: WebSocket fan-out, REST routing, and MJPEG frame serving.
 
 ### Rule 2 — Never Block the Blender UI Thread
-- `blender/live_receiver.py` must **only** use `sock.setblocking(False)` with `bpy.app.timers` at `0.016 s` intervals.
+- `blender/sonar_imaging/receiver.py` must **only** use `sock.setblocking(False)` with `bpy.app.timers` at `0.016 s` intervals.
 - Never use `while True:` loops, `sock.recv()` blocking calls, or Python `time.sleep()` inside any `bpy.app.timers` callback.
 
 ### Rule 3 — Always Maintain `SONAR_MOCK_MODE=true` Compatibility

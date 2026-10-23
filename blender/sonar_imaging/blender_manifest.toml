@@ -1,0 +1,14 @@
+schema_version = "1.0.0"
+
+id = "sonar_imaging_receiver"
+version = "1.0.0"
+name = "Sonar Imaging Live Receiver"
+tagline = "Real-time acoustic point cloud and telemetry receiver over UDP"
+maintainer = "Sonar Imaging Team <sonar-imaging@example.com>"
+type = "add-on"
+
+blender_version_min = "4.2.0"
+license = ["SPDX:GPL-3.0-or-later"]
+
+[permissions]
+network = "Listen on a local UDP port for sonar telemetry from the backend"

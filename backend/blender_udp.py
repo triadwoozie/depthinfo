@@ -1,7 +1,7 @@
 """
 blender_udp.py — High-frequency non-blocking UDP sender to Blender.
 
-Sends JSON-encoded packets to 127.0.0.1:5005 (Blender live_receiver.py) at
+Sends JSON-encoded packets to 127.0.0.1:5005 (Blender "Sonar Imaging Live Receiver" extension) at
 the rate defined by settings.udp_hz (default 30 Hz).
 
 Design rules (from AGENTS.md Rule 1):
@@ -31,7 +31,7 @@ _ping_counter: int = 0
 
 class BlenderBridge:
     """
-    Sends fused sonar+vision data to the Blender live_receiver.py via UDP.
+    Sends fused sonar+vision data to the Blender receiver extension via UDP.
 
     Usage::
 
@@ -54,6 +54,7 @@ class BlenderBridge:
         self._sock: socket.socket | None = None
         self._sent_count: int = 0
         self._max_points: int = 120
+        self._last_reading_ts: float = 0.0
         self._last_sent: float = 0.0
 
     # ------------------------------------------------------------------
@@ -104,11 +105,15 @@ class BlenderBridge:
                 points, colors = self._points_provider(self._max_points)
 
                 _ping_counter = (_ping_counter + 1) % (2 ** 32)
+                # 1 only on the first packet after a fresh sonar reading (a chirp echo
+                # arrived); 0 while the same reading is repeated at the UDP rate.
+                ping_pulse = 1 if reading.timestamp != self._last_reading_ts else 0
+                self._last_reading_ts = reading.timestamp
 
                 packet = {
                     "state": reading.status,
                     "sonar_z": reading.sonar_depth_m,
-                    "ping_pulse": _ping_counter % 2,  # 0/1 alternating pulse
+                    "ping_pulse": ping_pulse,
                     "audio_energy": reading.peak_amplitude,
                     "color_mode": get_config().blender_style.color_mode,
                     "points": points,
