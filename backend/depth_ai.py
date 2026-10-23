@@ -296,6 +296,16 @@ def build_optimized_session(model_path: str | Path) -> "ort.InferenceSession":
     if ort is None:
         raise RuntimeError("onnxruntime is not installed")
 
+    # pip-installed CUDA/cuDNN (the nvidia-* wheels behind onnxruntime-gpu[cuda,cudnn]) are not on
+    # the dynamic loader's path, so the CUDA provider is listed yet fails to load
+    # ("libcublasLt.so.13: cannot open shared object file"). preload_dlls() loads them first.
+    preload = getattr(ort, "preload_dlls", None)
+    if preload is not None:
+        try:
+            preload()
+        except Exception as exc:  # no GPU libraries present: the CPU path below still works
+            logger.info("onnxruntime.preload_dlls() skipped: %s", exc)
+
     available = ort.get_available_providers()
     logger.info("Available ONNX providers detected on system: %s", available)
     if "CPUExecutionProvider" not in available:
